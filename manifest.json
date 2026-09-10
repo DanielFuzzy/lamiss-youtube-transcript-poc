@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Lamiss YouTube Transcript POC",
+  "version": "0.1.0",
+  "description": "Investigates extracting YouTube caption data from the browser for a Lamiss transcript POC.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+  "action": {
+    "default_title": "Lamiss Transcript POC",
+    "default_popup": "src/popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["compiled/content/youtube.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "lamiss-youtube-transcript-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/chrome": "latest",
+    "typescript": "5.4.5"
+  }
+}
