@@ -22,8 +22,24 @@ loadTranscriptButton?.addEventListener('click', async () => {
       return;
     }
 
-    if (!activeTab.url?.includes('youtube.com/watch')) {
-      setStatus('Status: Active tab is not YouTube');
+    if (!activeTab.url) {
+      setStatus('Status: Active tab has no URL');
+      return;
+    }
+
+    const parsedActiveTabUrl = new URL(activeTab.url);
+    if (parsedActiveTabUrl.hostname !== 'www.youtube.com' && parsedActiveTabUrl.hostname !== 'youtube.com') {
+      setStatus('Status: Active tab is not a YouTube watch page');
+      return;
+    }
+
+    if (parsedActiveTabUrl.pathname !== '/watch') {
+      setStatus('Status: Active tab is not a YouTube watch page');
+      return;
+    }
+
+    if (!parsedActiveTabUrl.searchParams.get('v')) {
+      setStatus('Status: Active tab is not a YouTube watch page');
       return;
     }
 
@@ -31,7 +47,8 @@ loadTranscriptButton?.addEventListener('click', async () => {
       activeTab.id,
       {
         type: 'LOAD_TRANSCRIPT',
-        language: selectedLanguage
+        language: selectedLanguage,
+        tabId: activeTab.id
       },
       (response) => {
         if (chrome.runtime.lastError) {
@@ -40,12 +57,12 @@ loadTranscriptButton?.addEventListener('click', async () => {
           return;
         }
 
-        if (!response?.ok) {
-          setStatus(`Status: ${response?.message ?? 'Transcript failed'}`);
+        if (!response?.success) {
+          setStatus(`Status: ${response?.error ?? 'Transcript failed'}`);
           return;
         }
 
-        setStatus(`Status: ${response.message ?? 'Transcript loaded'}`);
+        setStatus(`Status: Video ${response.videoId ?? 'unknown'} loaded for ${response.language ?? selectedLanguage}`);
       }
     );
   } catch (error) {

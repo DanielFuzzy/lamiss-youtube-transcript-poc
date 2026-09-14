@@ -1,0 +1,21 @@
+{
+  "phase": "3.1",
+  "success": false,
+  "videoId": "LeRylkDym54",
+  "language": "es",
+  "captionTracksFound": false,
+  "matchingTrackFound": false,
+  "captionUrlFound": false,
+  "fetchExecutedInMainWorld": false,
+  "httpStatus": null,
+  "responseOk": false,
+  "contentType": "unknown",
+  "responseBodyLength": 0,
+  "jsonParsed": false,
+  "eventsExists": false,
+  "eventsCount": 0,
+  "segmentsWithText": 0,
+  "notes": [
+    "browserType.launch: Executable doesn't exist at C:\\Users\\perro\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     npx playwright install                                 ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+  ]
+}
