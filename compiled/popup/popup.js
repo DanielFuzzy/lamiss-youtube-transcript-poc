@@ -1,10 +1,24 @@
 "use strict";
+const LAMISS_BACKEND_ENDPOINT = 'http://localhost:8080/api/transcripts';
 const languageSelect = document.getElementById('language');
 const loadTranscriptButton = document.getElementById('loadTranscript');
 const statusBox = document.getElementById('status');
 function setStatus(message) {
     if (statusBox) {
         statusBox.textContent = message;
+    }
+}
+async function sendTranscriptToBackend(payload) {
+    try {
+        const response = await fetch(LAMISS_BACKEND_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        return { ok: response.ok, status: response.status };
+    }
+    catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
 }
 loadTranscriptButton?.addEventListener('click', async () => {
@@ -38,7 +52,7 @@ loadTranscriptButton?.addEventListener('click', async () => {
             type: 'LOAD_TRANSCRIPT',
             language: selectedLanguage,
             tabId: activeTab.id
-        }, (response) => {
+        }, async (response) => {
             if (chrome.runtime.lastError) {
                 setStatus('Status: Content script unavailable');
                 console.error('Content script error:', chrome.runtime.lastError.message);
@@ -48,7 +62,21 @@ loadTranscriptButton?.addEventListener('click', async () => {
                 setStatus(`Status: ${response?.error ?? 'Transcript failed'}`);
                 return;
             }
-            setStatus(`Status: Video ${response.videoId ?? 'unknown'} loaded for ${response.language ?? selectedLanguage}`);
+            const translatedNote = response.translated ? ' (machine-translated)' : '';
+            const loadedNote = `Video ${response.videoId ?? 'unknown'} loaded for ${response.language ?? selectedLanguage}${translatedNote}`;
+            setStatus(`Status: ${loadedNote} — sending to Lamiss...`);
+            const uploadResult = await sendTranscriptToBackend({
+                videoId: response.videoId,
+                language: response.language,
+                translated: response.translated,
+                rawCaptionResponse: response.rawCaptionResponse
+            });
+            if (!uploadResult.ok) {
+                console.error('Lamiss backend upload failed:', uploadResult.error ?? uploadResult.status);
+                setStatus(`Status: ${loadedNote} — upload failed`);
+                return;
+            }
+            setStatus(`Status: ${loadedNote} — sent to Lamiss`);
         });
     }
     catch (error) {

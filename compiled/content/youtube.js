@@ -48,7 +48,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             chrome.runtime.sendMessage({
                 type: 'DISCOVER_CAPTION_TRACKS',
                 tabId,
-                language: pendingRequestedLanguage
+                language: pendingRequestedLanguage,
+                videoId: parsed.videoId
             });
             console.log('Lamiss POC: caption request started');
         }
@@ -77,18 +78,19 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
     const captionTracks = Array.isArray(result.tracks) ? result.tracks : [];
     console.log('Lamiss POC: caption tracks discovered = true');
     console.log('Lamiss POC: caption tracks count =', captionTracks.length);
-    const selectedTrack = captionTracks.find(track => track.languageCode?.toLowerCase() === pendingRequestedLanguage);
+    const { track: selectedTrack, matchType } = selectCaptionTrack(captionTracks, pendingRequestedLanguage);
     if (!selectedTrack) {
         const available = captionTracks.map(track => track.languageCode ?? 'unknown').join(', ');
         console.log('Lamiss POC: requested language =', pendingRequestedLanguage);
         console.log('Lamiss POC: matching track discovered = false');
         console.log('Lamiss POC: available languages =', available);
         if (pendingSendResponse) {
-            pendingSendResponse({ success: false, error: 'Requested caption language is not available' });
+            pendingSendResponse({ success: false, error: 'No caption tracks are available for this video' });
         }
         return true;
     }
     console.log('Lamiss POC: matching track discovered = true');
+    console.log('Lamiss POC: match type =', matchType);
     if (!selectedTrack.baseUrl) {
         console.log('Lamiss POC: caption baseUrl obtained = false');
         if (pendingSendResponse) {
@@ -101,6 +103,10 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
     console.log('Lamiss POC: caption resource URL redacted =', redactCaptionUrl(selectedTrack.baseUrl));
     const captionUrl = new URL(selectedTrack.baseUrl);
     captionUrl.searchParams.set('fmt', 'json3');
+    if (matchType === 'translated') {
+        captionUrl.searchParams.set('tlang', pendingRequestedLanguage);
+        console.log('Lamiss POC: tlang translation requested =', pendingRequestedLanguage);
+    }
     console.log('Lamiss POC: fmt=json3 requested = true');
     console.log('Lamiss POC: caption request started');
     (async () => {
@@ -154,6 +160,7 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
                         success: true,
                         videoId: pendingVideoId,
                         language: pendingRequestedLanguage,
+                        translated: matchType === 'translated',
                         rawCaptionResponse: data
                     });
                 }
@@ -210,6 +217,33 @@ function parseYouTubeWatchUrl(url) {
         return { success: false, error: 'YouTube watch page has no video ID' };
     }
     return { success: true, videoId };
+}
+function primaryLanguageSubtag(languageCode) {
+    return languageCode.split('-')[0].toLowerCase();
+}
+function selectCaptionTrack(tracks, requestedLanguage) {
+    if (tracks.length === 0) {
+        return { track: undefined, matchType: 'none' };
+    }
+    const exact = tracks.find(track => track.languageCode?.toLowerCase() === requestedLanguage);
+    if (exact) {
+        return { track: exact, matchType: 'exact' };
+    }
+    // YouTube commonly exposes region-tagged codes (es-419, en-US, ...) that
+    // don't equal a plain "es"/"en" request exactly. Match on the primary
+    // subtag before giving up.
+    const requestedPrimary = primaryLanguageSubtag(requestedLanguage);
+    const prefixMatch = tracks.find(track => track.languageCode && primaryLanguageSubtag(track.languageCode) === requestedPrimary);
+    if (prefixMatch) {
+        return { track: prefixMatch, matchType: 'prefix' };
+    }
+    // No track exists in the requested language at all (common for videos
+    // with only a source-language auto-generated track). YouTube can still
+    // serve a machine-translated version of any existing track via `tlang`,
+    // so fall back to one instead of failing outright. Prefer a manually
+    // authored track over an ASR one as the translation source when both exist.
+    const translationSource = tracks.find(track => track.kind !== 'asr') ?? tracks[0];
+    return { track: translationSource, matchType: 'translated' };
 }
 function isValidCaptionResponse(response) {
     return !!response

@@ -5,7 +5,8 @@
   "description": "Investigates extracting YouTube caption data from the browser for a Lamiss transcript POC.",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "webRequest"
   ],
   "host_permissions": [
     "https://www.youtube.com/*"
