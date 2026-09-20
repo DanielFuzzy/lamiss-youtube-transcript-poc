@@ -1,4 +1,4 @@
-const LAMISS_BACKEND_ENDPOINT = 'http://localhost:8080/api/transcripts';
+const LAMISS_BACKEND_ENDPOINT = 'http://localhost:8080/api/transcripts/';
 
 const languageSelect = document.getElementById('language') as HTMLSelectElement | null;
 const loadTranscriptButton = document.getElementById('loadTranscript') as HTMLButtonElement | null;
@@ -11,7 +11,7 @@ function setStatus(message: string): void {
 }
 
 async function sendTranscriptToBackend(payload: {
-  videoId?: string;
+  videoExternalId?: string;
   language?: string;
   translated?: boolean;
   rawCaptionResponse?: unknown;
@@ -89,7 +89,7 @@ loadTranscriptButton?.addEventListener('click', async () => {
         setStatus(`Status: ${loadedNote} — sending to Lamiss...`);
 
         const uploadResult = await sendTranscriptToBackend({
-          videoId: response.videoId,
+          videoExternalId: response.videoId,
           language: response.language,
           translated: response.translated,
           rawCaptionResponse: response.rawCaptionResponse

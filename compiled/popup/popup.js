@@ -1,5 +1,5 @@
 "use strict";
-const LAMISS_BACKEND_ENDPOINT = 'http://localhost:8080/api/transcripts';
+const LAMISS_BACKEND_ENDPOINT = 'http://localhost:8080/api/transcripts/';
 const languageSelect = document.getElementById('language');
 const loadTranscriptButton = document.getElementById('loadTranscript');
 const statusBox = document.getElementById('status');
@@ -66,7 +66,7 @@ loadTranscriptButton?.addEventListener('click', async () => {
             const loadedNote = `Video ${response.videoId ?? 'unknown'} loaded for ${response.language ?? selectedLanguage}${translatedNote}`;
             setStatus(`Status: ${loadedNote} — sending to Lamiss...`);
             const uploadResult = await sendTranscriptToBackend({
-                videoId: response.videoId,
+                videoExternalId: response.videoId,
                 language: response.language,
                 translated: response.translated,
                 rawCaptionResponse: response.rawCaptionResponse
