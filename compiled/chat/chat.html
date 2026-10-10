@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lamiss Chat</title>
+  <style>
+    :root {
+      --bg: #12081f;
+      --surface: rgba(39, 23, 66, 0.72);
+      --surface-strong: #2a1847;
+      --border: rgba(196, 167, 255, 0.16);
+      --text: #f5f0ff;
+      --muted: #b4a3d6;
+      --accent: #8b5cf6;
+      --accent-strong: #7c3aed;
+      --accent-soft: #c4b5fd;
+      --pink: #e879f9;
+      --recording: #f43f5e;
+      --error: #fda4af;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    html {
+      background: var(--bg);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      font-family: "Roboto", system-ui, -apple-system, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      color: var(--text);
+      background:
+        radial-gradient(120% 50% at 0% 0%, #4c1d95 0%, transparent 60%),
+        radial-gradient(90% 40% at 100% 0%, #6b21a8 0%, transparent 55%),
+        var(--bg);
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 12px 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 800;
+      color: white;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--pink) 100%);
+      box-shadow: 0 4px 14px rgba(139, 92, 246, 0.45);
+    }
+
+    .title {
+      flex: 1;
+      min-width: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    #sessionStatus {
+      margin: 1px 0 0;
+      overflow: hidden;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      color: var(--muted);
+      background: transparent;
+    }
+
+    .icon-button:hover {
+      color: var(--text);
+      background: rgba(196, 167, 255, 0.12);
+    }
+
+    .icon-button svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    #messages {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 10px;
+      padding: 14px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(196, 167, 255, 0.25) transparent;
+    }
+
+    .note {
+      align-self: center;
+      max-width: 90%;
+      margin: 4px 0;
+      font-size: 12.5px;
+      line-height: 1.45;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .message {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-width: 86%;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .message.lamiss {
+      align-self: flex-start;
+    }
+
+    .meta {
+      padding: 0 4px;
+      font-size: 11.5px;
+      color: var(--muted);
+    }
+
+    .bubble {
+      padding: 9px 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-radius: 16px;
+    }
+
+    .user .bubble {
+      color: white;
+      background: linear-gradient(135deg, var(--accent-strong) 0%, #a21caf 100%);
+      border-bottom-right-radius: 5px;
+    }
+
+    .user .bubble.pending-voice {
+      font-style: italic;
+      opacity: 0.85;
+    }
+
+    .lamiss .bubble {
+      background: var(--surface-strong);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 5px;
+    }
+
+    .lamiss.error .bubble {
+      color: var(--error);
+      border-color: rgba(253, 164, 175, 0.35);
+    }
+
+    .retry {
+      align-self: flex-start;
+      margin: 2px 0 0 4px;
+      padding: 0;
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--accent-soft);
+      background: none;
+      border: none;
+    }
+
+    .retry:hover {
+      text-decoration: underline;
+    }
+
+    .typing {
+      display: inline-flex;
+      gap: 4px;
+      padding: 13px 14px;
+    }
+
+    .typing span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+
+    .typing span:nth-child(2) { animation-delay: 0.15s; }
+    .typing span:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    form {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      padding: 10px 10px 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 38px;
+      max-height: 120px;
+      padding: 9px 12px;
+      font: inherit;
+      line-height: 1.35;
+      resize: none;
+      color: var(--text);
+      background: var(--surface-strong);
+      border: 1px solid var(--border);
+      border-radius: 19px;
+    }
+
+    textarea::placeholder {
+      color: var(--muted);
+    }
+
+    textarea:focus-visible,
+    .round:focus-visible,
+    .icon-button:focus-visible {
+      outline: 2px solid var(--accent-soft);
+      outline-offset: 2px;
+    }
+
+    .round {
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      color: white;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--pink) 100%);
+      transition: filter 0.15s ease, transform 0.15s ease;
+    }
+
+    .round:hover:not(:disabled) {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+
+    .round:disabled {
+      cursor: default;
+      opacity: 0.45;
+    }
+
+    .round svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    #micButton {
+      color: var(--accent-soft);
+      background: var(--surface-strong);
+      border: 1px solid var(--border);
+    }
+
+    #micButton .icon-stop {
+      display: none;
+    }
+
+    #micButton[data-state='recording'] {
+      color: white;
+      background: var(--recording);
+      border-color: transparent;
+      animation: recording 1.4s ease-in-out infinite;
+    }
+
+    #micButton[data-state='recording'] .icon-mic {
+      display: none;
+    }
+
+    #micButton[data-state='recording'] .icon-stop {
+      display: block;
+    }
+
+    @keyframes recording {
+      50% { box-shadow: 0 0 0 6px rgba(244, 63, 94, 0.25); }
+    }
+
+    .icon-button[aria-expanded='true'] {
+      color: var(--text);
+      background: rgba(196, 167, 255, 0.16);
+    }
+
+    .settings {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px 14px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(18, 8, 31, 0.55);
+    }
+
+    .settings[hidden] {
+      display: none;
+    }
+
+    .settings-title {
+      margin: 0;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--accent-soft);
+    }
+
+    .setting {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 13px;
+    }
+
+    .setting-row output {
+      font-weight: 600;
+      color: var(--accent-soft);
+    }
+
+    .setting input[type='range'] {
+      width: 100%;
+      margin: 2px 0;
+      accent-color: var(--accent);
+    }
+
+    .setting-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .setting-hint {
+      margin: 0;
+      font-size: 11.5px;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo" aria-hidden="true">L</div>
+    <div class="title">
+      <h1>Lamiss</h1>
+      <p id="sessionStatus" aria-live="polite">Starting your session…</p>
+    </div>
+    <button id="settingsButton" class="icon-button" type="button" aria-expanded="false" aria-controls="settings" aria-label="Question settings" title="Question settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <line x1="4" y1="7" x2="20" y2="7" />
+        <line x1="4" y1="17" x2="20" y2="17" />
+        <circle cx="9" cy="7" r="2.4" fill="var(--bg)" />
+        <circle cx="15" cy="17" r="2.4" fill="var(--bg)" />
+      </svg>
+    </button>
+    <button id="closeButton" class="icon-button" type="button" aria-label="Hide the Lamiss chat" title="Hide the Lamiss chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <line x1="6" y1="6" x2="18" y2="18" />
+        <line x1="18" y1="6" x2="6" y2="18" />
+      </svg>
+    </button>
+  </header>
+
+  <section id="settings" class="settings" hidden aria-label="Lamiss's questions">
+    <p class="settings-title">Lamiss's questions</p>
+    <div class="setting">
+      <div class="setting-row">
+        <label for="amountInput">How many</label>
+        <output id="amountValue" for="amountInput"></output>
+      </div>
+      <input id="amountInput" type="range" min="0" max="8" step="1" />
+      <div class="setting-scale" aria-hidden="true"><span>Fewer</span><span>More</span></div>
+    </div>
+    <div class="setting">
+      <div class="setting-row">
+        <label for="difficultyInput">Difficulty</label>
+        <output id="difficultyValue" for="difficultyInput"></output>
+      </div>
+      <input id="difficultyInput" type="range" min="0" max="2" step="1" />
+      <div class="setting-scale" aria-hidden="true"><span>Easy</span><span>Hard</span></div>
+    </div>
+    <p class="setting-hint">Lamiss only asks about parts of the video you've already watched. Changes apply right away.</p>
+  </section>
+
+  <div id="messages" role="log" aria-live="polite" aria-label="Conversation with Lamiss">
+    <p class="note">Ask Lamiss anything about this video. Your question is tied to the moment you ask it.</p>
+  </div>
+
+  <form id="composer">
+    <label for="questionInput" class="visually-hidden">Your question</label>
+    <textarea id="questionInput" rows="1" placeholder="Ask about this video…" disabled></textarea>
+    <button id="micButton" class="round" type="button" data-state="idle" aria-label="Ask with your voice" title="Ask with your voice" disabled>
+      <svg class="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="2" width="6" height="12" rx="3" />
+        <path d="M5 10a7 7 0 0 0 14 0" />
+        <line x1="12" y1="17" x2="12" y2="22" />
+      </svg>
+      <svg class="icon-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="6" y="6" width="12" height="12" rx="2.5" />
+      </svg>
+    </button>
+    <button id="sendButton" class="round" type="submit" aria-label="Send question" title="Send" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="12" y1="19" x2="12" y2="5" />
+        <polyline points="5 12 12 5 19 12" />
+      </svg>
+    </button>
+  </form>
+
+  <script src="../shared/lamiss-api.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>

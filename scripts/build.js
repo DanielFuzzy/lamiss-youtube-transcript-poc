@@ -5,6 +5,10 @@ const root = path.resolve(__dirname, '..');
 const compiledDir = path.join(root, 'compiled');
 const sourceManifest = path.join(root, 'manifest.json');
 const sourcePopupHtml = path.join(root, 'src', 'popup', 'popup.html');
+const sourcePermissionHtml = path.join(root, 'src', 'permission', 'permission.html');
+const sourceChatHtml = path.join(root, 'src', 'chat', 'chat.html');
+const sourceOffscreenHtml = path.join(root, 'src', 'offscreen', 'offscreen.html');
+const sourceLamissButtonCss = path.join(root, 'src', 'content', 'lamiss-button.css');
 
 function fail(message) {
   console.error(`Lamiss POC build helper: ${message}`);
@@ -25,6 +29,10 @@ function copyFile(source, destination) {
 
 ensureFile(sourceManifest, 'Root manifest.json');
 ensureFile(sourcePopupHtml, 'Popup HTML source');
+ensureFile(sourcePermissionHtml, 'Permission HTML source');
+ensureFile(sourceChatHtml, 'Chat HTML source');
+ensureFile(sourceOffscreenHtml, 'Offscreen HTML source');
+ensureFile(sourceLamissButtonCss, 'Lamiss button CSS source');
 
 fs.mkdirSync(compiledDir, { recursive: true });
 fs.mkdirSync(path.join(compiledDir, 'popup'), { recursive: true });
@@ -32,5 +40,9 @@ fs.mkdirSync(path.join(compiledDir, 'content'), { recursive: true });
 
 copyFile(sourceManifest, path.join(compiledDir, 'manifest.json'));
 copyFile(sourcePopupHtml, path.join(compiledDir, 'popup', 'popup.html'));
+copyFile(sourcePermissionHtml, path.join(compiledDir, 'permission', 'permission.html'));
+copyFile(sourceChatHtml, path.join(compiledDir, 'chat', 'chat.html'));
+copyFile(sourceOffscreenHtml, path.join(compiledDir, 'offscreen', 'offscreen.html'));
+copyFile(sourceLamissButtonCss, path.join(compiledDir, 'content', 'lamiss-button.css'));
 
 console.log('Lamiss POC build helper: copied static extension files into compiled/.');

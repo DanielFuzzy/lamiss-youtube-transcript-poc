@@ -1,7 +1,10 @@
+// The worker is a classic script, so it shares the backend helpers this way.
+declare function importScripts(...urls: string[]): void;
+importScripts('shared/lamiss-api.js');
+
 type DiscoverTracksMessage = {
   type: 'DISCOVER_CAPTION_TRACKS';
   tabId: number;
-  language: string;
   videoId: string;
 };
 
@@ -17,6 +20,68 @@ type FetchCaptionResourceMainWorldResult = {
   contentType: string;
   text: string;
 };
+
+const LAMISS_TRANSCRIPT_INGEST_ENDPOINT = 'http://localhost:8080/api/transcripts/ingest';
+
+type VideoPlatform = 'YOUTUBE' | 'DISNEY' | 'NETFLIX' | 'HBO' | 'PRIMEVIDEO' | 'CRUNCHYROLL';
+
+// videoPlatform/videoTitle/videoDurationSeconds let the backend register the
+// video on its first ingest; they're ignored once the video already exists.
+type TranscriptIngestPayload = {
+  videoExternalId?: string;
+  videoPlatform?: VideoPlatform;
+  videoTitle?: string;
+  videoDurationSeconds?: number;
+  language?: string;
+  translated?: boolean;
+  rawCaptionResponse?: unknown;
+};
+
+type TranscriptIngestOutcome = {
+  ok: boolean;
+  status?: number;
+  ingestStatus?: string;
+  error?: string;
+};
+
+// Runs here rather than in the content script: the worker's localhost host
+// permission skips CORS, and youtube.com pages may not call localhost at all.
+async function ingestTranscript(payload: TranscriptIngestPayload): Promise<TranscriptIngestOutcome> {
+  try {
+    const response = await fetch(LAMISS_TRANSCRIPT_INGEST_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.log('Lamiss POC: transcript ingest HTTP status =', response.status, await response.text());
+      return { ok: false, status: response.status };
+    }
+
+    const body = await response.json().catch(() => undefined) as { status?: string } | undefined;
+    console.log('Lamiss POC: transcript ingest status =', body?.status ?? 'unknown');
+    return { ok: true, status: response.status, ingestStatus: body?.status };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  const type = (message as { type?: unknown } | null)?.type;
+
+  if (type === 'GET_SENDER_TAB_ID') {
+    sendResponse({ tabId: sender.tab?.id });
+    return false;
+  }
+
+  if (type === 'INGEST_TRANSCRIPT') {
+    void ingestTranscript((message as { payload: TranscriptIngestPayload }).payload).then(sendResponse);
+    return true;
+  }
+
+  return false;
+});
 
 async function fetchCaptionResourceMainWorld(captionUrl: string): Promise<FetchCaptionResourceMainWorldResult> {
   const response = await fetch(captionUrl, {
@@ -147,14 +212,22 @@ function discoverCaptionTracksMainWorld(expectedVideoId: string): {
   error?: string;
   diagnostics?: unknown;
   tracks?: Array<{ languageCode?: string; name?: { simpleText?: string; runs?: Array<{ text?: string }> }; baseUrl?: string; kind?: string }>;
+  videoDetails?: { title?: string; lengthSeconds?: string };
+  audioLanguage?: { languageCode: string; source: 'playing' | 'default' };
+  defaultCaptionTrackIndex?: number;
 } {
   const globalWindow = window as typeof window & {
     ytInitialPlayerResponse?: {
-      videoDetails?: { videoId?: string };
+      videoDetails?: { videoId?: string; title?: string; lengthSeconds?: string };
       captions?: {
         playerCaptionsTracklistRenderer?: {
           captionTracks?: CaptionTrack[];
+          audioTracks?: Array<{ defaultCaptionTrackIndex?: number }>;
+          defaultAudioTrackIndex?: number;
         };
+      };
+      streamingData?: {
+        adaptiveFormats?: Array<{ audioTrack?: { id?: string; audioIsDefault?: boolean } }>;
       };
     };
     ytInitialData?: unknown;
@@ -166,7 +239,10 @@ function discoverCaptionTracksMainWorld(expectedVideoId: string): {
   // describing whichever video the page loaded first. The player element's
   // own getPlayerResponse() always reflects whatever video is currently
   // loaded, so prefer it and fall back to the snapshot only if unavailable.
-  const moviePlayer = document.getElementById('movie_player') as (Element & { getPlayerResponse?: () => unknown }) | null;
+  const moviePlayer = document.getElementById('movie_player') as (Element & {
+    getPlayerResponse?: () => unknown;
+    getAudioTrack?: () => { id?: unknown } | undefined;
+  }) | null;
   const livePlayerResponse = typeof moviePlayer?.getPlayerResponse === 'function'
     ? (moviePlayer.getPlayerResponse() as typeof globalWindow.ytInitialPlayerResponse)
     : undefined;
@@ -227,6 +303,50 @@ function discoverCaptionTracksMainWorld(expectedVideoId: string): {
     };
   }
 
+  // The language of the audio the viewer is hearing. Videos with several
+  // audio tracks (e.g. YouTube's AI dubs) play one picked from the viewer's
+  // locale, so this can differ from the original language. While playing,
+  // getAudioTrack().id is "<itag>;<base64url protobuf xtags>", and the xtags
+  // carry a "lang" entry. Before playback (id "und") fall back to the stream
+  // marked as the default audio, whose id looks like "es-US.4".
+  const readXtagsLanguage = (trackId: string): string | undefined => {
+    const xtags = trackId.split(';')[1];
+    if (!xtags) {
+      return undefined;
+    }
+    try {
+      const bytes = atob(xtags.replace(/-/g, '+').replace(/_/g, '/'));
+      // Each xtag is a key/value pair of length-prefixed strings: ...\x04lang\x12<len><value>
+      const keyIndex = bytes.indexOf('\x04lang\x12');
+      if (keyIndex < 0) {
+        return undefined;
+      }
+      const valueStart = keyIndex + 6;
+      return bytes.substr(valueStart + 1, bytes.charCodeAt(valueStart)) || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  let audioLanguage: { languageCode: string; source: 'playing' | 'default' } | undefined;
+  try {
+    const playingId = moviePlayer?.getAudioTrack?.()?.id;
+    const playingLanguage = typeof playingId === 'string' ? readXtagsLanguage(playingId) : undefined;
+    if (playingLanguage) {
+      audioLanguage = { languageCode: playingLanguage, source: 'playing' };
+    }
+  } catch {
+    // Player API unavailable; use the default audio stream below.
+  }
+  if (!audioLanguage) {
+    const defaultAudioId = playerResponse?.streamingData?.adaptiveFormats
+      ?.find(format => format.audioTrack?.audioIsDefault)?.audioTrack?.id;
+    const defaultLanguage = defaultAudioId?.split('.')[0];
+    if (defaultLanguage) {
+      audioLanguage = { languageCode: defaultLanguage, source: 'default' };
+    }
+  }
+
   return {
     success: true,
     tracks: tracks.map(track => ({
@@ -235,16 +355,22 @@ function discoverCaptionTracksMainWorld(expectedVideoId: string): {
       baseUrl: track.baseUrl,
       kind: track.kind
     })),
+    audioLanguage,
+    defaultCaptionTrackIndex: renderer?.audioTracks?.[renderer.defaultAudioTrackIndex ?? 0]?.defaultCaptionTrackIndex,
+    videoDetails: {
+      title: playerResponse?.videoDetails?.title,
+      lengthSeconds: playerResponse?.videoDetails?.lengthSeconds
+    },
     diagnostics
   };
 }
 
 function isDiscoverTracksMessage(message: unknown): message is DiscoverTracksMessage {
-  if (typeof message !== 'object' || message === null || !('type' in message) || !('tabId' in message) || !('language' in message) || !('videoId' in message)) {
+  if (typeof message !== 'object' || message === null || !('type' in message) || !('tabId' in message) || !('videoId' in message)) {
     return false;
   }
 
-  const typed = message as { type?: string; tabId?: unknown; language?: unknown; videoId?: unknown };
+  const typed = message as { type?: string; tabId?: unknown; videoId?: unknown };
   if (typed.type !== 'DISCOVER_CAPTION_TRACKS') {
     return false;
   }
@@ -253,11 +379,7 @@ function isDiscoverTracksMessage(message: unknown): message is DiscoverTracksMes
     return false;
   }
 
-  if (typeof typed.videoId !== 'string' || typed.videoId.trim().length === 0) {
-    return false;
-  }
-
-  return typeof typed.language === 'string' && typed.language.trim().length > 0;
+  return typeof typed.videoId === 'string' && typed.videoId.trim().length > 0;
 }
 
 function isFetchCaptionResourceMessage(message: unknown): message is FetchCaptionResourceMessage {
@@ -359,12 +481,13 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, _sendResponse) => {
   if (!isDiscoverTracksMessage(message)) {
-    console.log('Lamiss POC: malformed DISCOVER_CAPTION_TRACKS message received');
+    if ((message as { type?: unknown } | null)?.type === 'DISCOVER_CAPTION_TRACKS') {
+      console.log('Lamiss POC: malformed DISCOVER_CAPTION_TRACKS message received');
+    }
     return false;
   }
 
   const tabId = message.tabId;
-  const requestedLanguage = message.language.trim().toLowerCase();
   const expectedVideoId = message.videoId;
   const apiAvailable = Boolean(chrome.scripting && typeof chrome.scripting.executeScript === 'function');
 
@@ -387,7 +510,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, _sendResponse) 
   (async () => {
     try {
       const startedAt = Date.now();
-      let lastResult: { success?: boolean; error?: string; tracks?: Array<{ languageCode?: string; name?: { simpleText?: string; runs?: Array<{ text?: string }> }; baseUrl?: string; kind?: string }>; diagnostics?: unknown } | undefined;
+      let lastResult: ReturnType<typeof discoverCaptionTracksMainWorld> | undefined;
 
       while (Date.now() - startedAt < 5000) {
         const results = await chrome.scripting.executeScript({
@@ -397,19 +520,13 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, _sendResponse) 
           args: [expectedVideoId]
         });
 
-        const result = results[0]?.result as { success?: boolean; error?: string; tracks?: Array<{ languageCode?: string; name?: { simpleText?: string; runs?: Array<{ text?: string }> }; baseUrl?: string; kind?: string }>; diagnostics?: unknown } | undefined;
+        const result = results[0]?.result as ReturnType<typeof discoverCaptionTracksMainWorld> | undefined;
         if (result?.success) {
           const trackList = Array.isArray(result.tracks) ? result.tracks : [];
-          const selected = trackList.find(track => track.languageCode?.toLowerCase() === requestedLanguage);
-          if (selected || trackList.length > 0) {
+          if (trackList.length > 0) {
             lastResult = result;
             break;
           }
-        }
-
-        if (result?.success === false && result.error === 'Requested caption language is not available') {
-          lastResult = result;
-          break;
         }
 
         await new Promise(resolve => setTimeout(resolve, 250));
@@ -438,4 +555,338 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, _sendResponse) 
   })();
 
   return true;
+});
+
+// ---------------------------------------------------------------------------
+// Live connection for Lamiss's proactive questions. Each watch tab opens a
+// port; the worker turns it into a WebSocket to the backend, because the
+// worker can reach localhost while youtube.com pages may not. The tab's
+// heartbeats keep this worker alive; if it is stopped anyway, the port
+// disconnects and the tab connects again.
+// ---------------------------------------------------------------------------
+
+const LAMISS_LIVE_PORT_NAME = 'lamiss-live';
+const LAMISS_LIVE_MAX_BACKOFF_MS = 30_000;
+const WEBSOCKET_POLICY_VIOLATION = 1008;
+
+type LamissServerMessage =
+  | { type: 'PAUSE_VIDEO' }
+  | { type: 'ASK_QUESTION'; eventId: string; question: string }
+  | { type: 'FEEDBACK'; correct: boolean; feedback: string }
+  | { type: 'RESUME_VIDEO' }
+  | { type: 'ERROR'; message: string }
+  // When the next question will come if the video keeps playing; atVideoMs
+  // is null when none is coming.
+  | { type: 'NEXT_QUESTION'; atVideoMs: number | null; waitingForAnswer: boolean };
+
+type LamissLiveClientMessage =
+  | { type: 'start'; videoId: string }
+  // playing: false reports where a paused viewer is; it never triggers a question.
+  | { type: 'position'; positionMs: number; playing?: boolean }
+  | { type: 'answer'; answeredTo: string; answer: string }
+  | { type: 'listen'; requestId: string }
+  | { type: 'stop-listening'; requestId: string; discard: boolean }
+  | { type: 'speak'; requestId: string; text: string; language?: string }
+  | { type: 'stop-speaking'; requestId: string }
+  | { type: 'keepalive' };
+
+// Progress of a spoken answer, reported by the offscreen recorder.
+type LamissListenEvent =
+  | { type: 'listening'; noSpeechTimeoutMs: number }
+  | { type: 'speech-started' }
+  | { type: 'no-speech' }
+  | { type: 'transcribing' }
+  | { type: 'transcribed'; text: string }
+  | { type: 'failed'; error: string; micDenied?: boolean };
+
+type LamissLiveState = 'connecting' | 'connected' | 'reconnecting' | 'failed';
+
+type LamissLiveWorkerMessage =
+  | { type: 'status'; state: LamissLiveState; detail?: string }
+  | { type: 'server'; message: LamissServerMessage }
+  | { type: 'answer-queued' }
+  | { type: 'listen-event'; requestId: string; event: LamissListenEvent }
+  | { type: 'speech-event'; requestId: string; event: LamissSpeechEvent };
+
+// Lamiss's voice, played by the offscreen document.
+type LamissSpeechEvent = { type: 'started' } | { type: 'ended' } | { type: 'failed'; error: string };
+
+type LamissPendingQuestion = { eventId: string; question: string };
+
+type LamissLiveConnection = {
+  port: chrome.runtime.Port;
+  videoId?: string;
+  learningSessionId?: number;
+  socket?: WebSocket;
+  attempt: number;
+  retryTimer?: ReturnType<typeof setTimeout>;
+  closed: boolean;
+};
+
+const liveConnections = new Set<LamissLiveConnection>();
+
+async function sendQuestionSettings(socket: WebSocket): Promise<void> {
+  const settings = await readQuestionSettings();
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'QUESTION_SETTINGS', ...settings }));
+  }
+}
+
+// The sliders in the chat panel apply right away to every open connection.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[LAMISS_QUESTION_SETTINGS_KEY]) {
+    return;
+  }
+  for (const live of liveConnections) {
+    if (live.socket) {
+      void sendQuestionSettings(live.socket);
+    }
+  }
+});
+
+function postLive(live: LamissLiveConnection, message: LamissLiveWorkerMessage): void {
+  if (live.closed) {
+    return;
+  }
+  try {
+    live.port.postMessage(message);
+  } catch {
+    live.closed = true;
+  }
+}
+
+// The backend never repeats a question that is asked but unanswered, and it
+// asks nothing new until that one is answered. Remember it here so a dropped
+// socket, a restarted worker or a page reload can show it again.
+function pendingQuestionKey(learningSessionId: number): string {
+  return `lamissPendingQuestion:${learningSessionId}`;
+}
+
+async function readPendingQuestion(learningSessionId: number): Promise<LamissPendingQuestion | undefined> {
+  const key = pendingQuestionKey(learningSessionId);
+  const stored = await chrome.storage.local.get(key);
+  return stored[key] as LamissPendingQuestion | undefined;
+}
+
+function scheduleLiveReconnect(live: LamissLiveConnection, detail: string): void {
+  if (live.closed) {
+    return;
+  }
+  const delay = Math.min(1000 * 2 ** live.attempt, LAMISS_LIVE_MAX_BACKOFF_MS);
+  live.attempt += 1;
+  postLive(live, { type: 'status', state: 'reconnecting', detail });
+  live.retryTimer = setTimeout(() => void connectLive(live), delay);
+}
+
+async function connectLive(live: LamissLiveConnection): Promise<void> {
+  if (live.closed || !live.videoId) {
+    return;
+  }
+
+  if (live.learningSessionId === undefined) {
+    const session = await startLearningSession(live.videoId);
+    if (live.closed) {
+      return;
+    }
+    if (!session.ok) {
+      if (session.retryable) {
+        scheduleLiveReconnect(live, session.error);
+      } else {
+        postLive(live, { type: 'status', state: 'failed', detail: session.error });
+      }
+      return;
+    }
+    live.learningSessionId = session.data.learningSessionId;
+  }
+
+  const learningSessionId = live.learningSessionId;
+  const socket = new WebSocket(`${LAMISS_WS_BASE_URL}/ws/learning-sessions/${learningSessionId}/${LAMISS_USER_ID}`);
+  live.socket = socket;
+
+  socket.addEventListener('open', () => {
+    live.attempt = 0;
+    void sendQuestionSettings(socket);
+    postLive(live, { type: 'status', state: 'connected' });
+    void readPendingQuestion(learningSessionId).then((pending) => {
+      if (pending && live.socket === socket) {
+        postLive(live, { type: 'server', message: { type: 'PAUSE_VIDEO' } });
+        postLive(live, { type: 'server', message: { type: 'ASK_QUESTION', ...pending } });
+      }
+    });
+  });
+
+  socket.addEventListener('message', (event) => {
+    let message: LamissServerMessage;
+    try {
+      message = JSON.parse(String(event.data)) as LamissServerMessage;
+    } catch {
+      console.warn('Lamiss POC: ignoring a non-JSON message from Lamiss:', event.data);
+      return;
+    }
+
+    if (message.type === 'ASK_QUESTION') {
+      void chrome.storage.local.set({ [pendingQuestionKey(learningSessionId)]: { eventId: message.eventId, question: message.question } });
+    } else if (message.type === 'FEEDBACK') {
+      // Feedback means the backend has stored the answer.
+      void chrome.storage.local.remove(pendingQuestionKey(learningSessionId));
+    } else if (message.type === 'ERROR') {
+      console.warn('Lamiss POC: Lamiss reported an error:', message.message);
+    }
+    postLive(live, { type: 'server', message });
+  });
+
+  socket.addEventListener('close', (event) => {
+    if (live.socket !== socket || live.closed) {
+      return;
+    }
+    live.socket = undefined;
+    if (event.code === WEBSOCKET_POLICY_VIOLATION) {
+      // Not a participant of the session: retrying can't fix that.
+      console.error('Lamiss POC: Lamiss refused the live connection:', event.reason);
+      postLive(live, { type: 'status', state: 'failed', detail: event.reason || 'Lamiss refused the connection' });
+      return;
+    }
+    scheduleLiveReconnect(live, event.reason || 'The connection to Lamiss dropped');
+  });
+}
+
+function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClientMessage): void {
+  const socket = live.socket?.readyState === WebSocket.OPEN ? live.socket : undefined;
+
+  switch (message.type) {
+    case 'start':
+      if (!live.videoId && typeof message.videoId === 'string') {
+        live.videoId = message.videoId;
+        postLive(live, { type: 'status', state: 'connecting' });
+        void connectLive(live);
+      }
+      break;
+    case 'position':
+      if (Number.isFinite(message.positionMs)) {
+        socket?.send(JSON.stringify({
+          type: 'VIDEO_POSITION',
+          positionMs: Math.max(0, Math.round(message.positionMs)),
+          ...(message.playing === false ? { playing: false } : {})
+        }));
+      }
+      break;
+    case 'answer':
+      // While offline the tab keeps the answer and sends it again on 'connected'.
+      if (socket) {
+        socket.send(JSON.stringify({ type: 'ANSWER', answeredTo: message.answeredTo, answer: message.answer }));
+      } else {
+        postLive(live, { type: 'answer-queued' });
+      }
+      break;
+    case 'listen':
+      listeningPorts.set(message.requestId, live);
+      void ensureOffscreenRecorder()
+        .then(() => chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'listen', requestId: message.requestId }))
+        .catch((error: unknown) => {
+          listeningPorts.delete(message.requestId);
+          postLive(live, {
+            type: 'listen-event',
+            requestId: message.requestId,
+            event: { type: 'failed', error: error instanceof Error ? error.message : String(error) }
+          });
+        });
+      break;
+    case 'stop-listening':
+    case 'stop-speaking':
+      void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', ...message }).catch(() => undefined);
+      break;
+    case 'speak':
+      speakingPorts.set(message.requestId, live);
+      void ensureOffscreenRecorder()
+        .then(() => chrome.runtime.sendMessage({ target: 'lamiss-offscreen', ...message }))
+        .catch((error: unknown) => {
+          speakingPorts.delete(message.requestId);
+          postLive(live, {
+            type: 'speech-event',
+            requestId: message.requestId,
+            event: { type: 'failed', error: error instanceof Error ? error.message : String(error) }
+          });
+        });
+      break;
+    case 'keepalive':
+      // Receiving it is enough: it resets the worker's idle timer.
+      break;
+  }
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== LAMISS_LIVE_PORT_NAME) {
+    return;
+  }
+
+  const live: LamissLiveConnection = { port, attempt: 0, closed: false };
+  liveConnections.add(live);
+  port.onMessage.addListener((message: LamissLiveClientMessage) => onLiveClientMessage(live, message));
+  port.onDisconnect.addListener(() => {
+    liveConnections.delete(live);
+    live.closed = true;
+    clearTimeout(live.retryTimer);
+    live.socket?.close(1000, 'Tab left the video');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Spoken answers. Recording happens in an offscreen document: it has the
+// extension's microphone permission, which youtube.com pages don't.
+// ---------------------------------------------------------------------------
+
+const OFFSCREEN_RECORDER_URL = 'offscreen/offscreen.html';
+const listeningPorts = new Map<string, LamissLiveConnection>();
+const speakingPorts = new Map<string, LamissLiveConnection>();
+let offscreenRecorderCreating: Promise<void> | null = null;
+
+async function ensureOffscreenRecorder(): Promise<void> {
+  const existing = await chrome.runtime.getContexts({
+    contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_RECORDER_URL)]
+  });
+  if (existing.length > 0) {
+    return;
+  }
+  offscreenRecorderCreating ??= chrome.offscreen.createDocument({
+    url: OFFSCREEN_RECORDER_URL,
+    reasons: [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.AUDIO_PLAYBACK],
+    justification: 'Record the user\'s spoken answers to Lamiss\'s questions and read Lamiss\'s questions aloud'
+  }).finally(() => {
+    offscreenRecorderCreating = null;
+  });
+  await offscreenRecorderCreating;
+}
+
+chrome.runtime.onMessage.addListener((message: { source?: string; requestId?: string; speech?: LamissSpeechEvent }) => {
+  if (message?.source !== 'lamiss-offscreen' || !message.requestId || !message.speech) {
+    return false;
+  }
+  const live = speakingPorts.get(message.requestId);
+  if (message.speech.type !== 'started') {
+    speakingPorts.delete(message.requestId);
+  }
+  if (live) {
+    postLive(live, { type: 'speech-event', requestId: message.requestId, event: message.speech });
+  }
+  return false;
+});
+
+chrome.runtime.onMessage.addListener((message: { source?: string; requestId?: string; event?: LamissListenEvent }) => {
+  if (message?.source !== 'lamiss-offscreen' || !message.requestId || !message.event) {
+    return false;
+  }
+  const live = listeningPorts.get(message.requestId);
+  const event = message.event;
+  if (['no-speech', 'transcribed', 'failed'].includes(event.type)) {
+    listeningPorts.delete(message.requestId);
+  }
+  if (event.type === 'failed' && event.micDenied) {
+    // Offscreen documents can't show the permission prompt; this tab can.
+    void chrome.tabs.create({ url: chrome.runtime.getURL('permission/permission.html') });
+  }
+  if (live) {
+    postLive(live, { type: 'listen-event', requestId: message.requestId, event });
+  }
+  return false;
 });
