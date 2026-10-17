@@ -1,9 +1,12 @@
 // Lamiss backend calls shared by the extension pages (popup and in-page chat).
 // Loaded as a plain script before each page's own script; extension pages hold
-// the localhost host permission, so they call the backend directly.
+// the backend's host permission, so they call the backend directly.
 
-const LAMISS_API_BASE_URL = 'http://localhost:8080';
-const LAMISS_WS_BASE_URL = 'ws://localhost:8080';
+// Where the backend is: set at build time from LAMISS_API_URL (see
+// scripts/build.js), which writes them to shared/lamiss-config.js. That file
+// is loaded before this one everywhere.
+declare const LAMISS_API_BASE_URL: string;
+declare const LAMISS_WS_BASE_URL: string;
 
 // There are no accounts yet: the backend hardcodes this local mock user too.
 const LAMISS_USER_ID = 1001;
@@ -68,6 +71,8 @@ function saveQuestionSettings(settings: LamissQuestionSettings): Promise<void> {
   return chrome.storage.local.set({ [LAMISS_QUESTION_SETTINGS_KEY]: settings });
 }
 
+const LAMISS_UNREACHABLE_MESSAGE = `Could not reach Lamiss at ${LAMISS_API_BASE_URL}. Check your connection and try again.`;
+
 type LamissCallResult<T> =
   | { ok: true; data: T }
   | { ok: false; status?: number; error: string; retryable: boolean };
@@ -97,9 +102,45 @@ async function callLamiss<T>(path: string, init: RequestInit): Promise<LamissCal
     return { ok: true, data: await response.json() as T };
   } catch (error) {
     console.error('Lamiss POC: backend unreachable:', path, error);
-    return { ok: false, error: 'Could not reach the Lamiss backend. Is it running on localhost:8080?', retryable: true };
+    return { ok: false, error: LAMISS_UNREACHABLE_MESSAGE, retryable: true };
   }
 }
+
+// One line of a learning session's conversation, in either direction: the
+// user's questions and Lamiss's answers, and Lamiss's questions, the user's
+// answers and Lamiss's feedback. occurredAt is the server's local time,
+// without an offset.
+type LamissChatEntry = {
+  speaker: 'USER' | 'LAMISS';
+  text: string;
+  occurredAt: string;
+};
+
+// What the background worker tells the chat panel as it happens on the live
+// connection, so the panel doesn't have to poll the history.
+type LamissLiveLogEvent =
+  | { type: 'lamiss-asked'; question: string }
+  | { type: 'answered'; answer: string; feedback: string }
+  // Something may have been missed (the connection dropped): reload the history.
+  | { type: 'resync' };
+
+const LAMISS_LIVE_LOG_SOURCE = 'lamiss-live-log';
+
+type LamissLiveLogMessage = {
+  source: typeof LAMISS_LIVE_LOG_SOURCE;
+  tabId: number;
+  learningSessionId: number;
+  event: LamissLiveLogEvent;
+};
+
+// The whole session's conversation, oldest first.
+function fetchSessionChat(learningSessionId: number): Promise<LamissCallResult<LamissChatEntry[]>> {
+  return callLamiss<LamissChatEntry[]>(`/api/learning-sessions/${learningSessionId}/chat`, {
+    headers: { accept: 'application/json' }
+  });
+}
+
+const LAMISS_START_SESSION_MESSAGE = 'lamiss:start-session';
 
 // Resumes the (hardcoded, local) user's open session on the video, or starts one.
 function startLearningSession(videoExternalId: string): Promise<LamissCallResult<LamissLearningSession>> {
@@ -131,11 +172,13 @@ function askLamiss(question: LamissQuestion): Promise<LamissCallResult<LamissAns
 }
 
 // Speech to text only: used for spoken answers to Lamiss's questions.
-function transcribeSpeech(audio: Blob): Promise<LamissCallResult<{ text?: string }>> {
+// language is the backend's name for what it heard ("ENGLISH", "SPANISH", …),
+// or null when it couldn't tell.
+function transcribeSpeech(audio: Blob): Promise<LamissCallResult<{ text?: string; language?: string | null }>> {
   const form = new FormData();
   const extension = audio.type === 'audio/ogg' ? 'ogg' : 'webm';
   form.append('audio', audio, `answer.${extension}`);
-  return callLamiss<{ text?: string }>('/api/speech/transcriptions', {
+  return callLamiss<{ text?: string; language?: string | null }>('/api/speech/transcriptions', {
     method: 'POST',
     headers: { accept: 'application/json' },
     body: form
@@ -157,7 +200,7 @@ async function synthesizeSpeech(text: string, language?: string): Promise<Lamiss
     }
     return { ok: true, data: await response.blob() };
   } catch {
-    return { ok: false, error: 'Could not reach the Lamiss backend. Is it running on localhost:8080?', retryable: true };
+    return { ok: false, error: LAMISS_UNREACHABLE_MESSAGE, retryable: true };
   }
 }
 

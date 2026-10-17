@@ -56,6 +56,14 @@ async function callLamiss(path, init) {
         return { ok: false, error: 'Could not reach the Lamiss backend. Is it running on localhost:8080?', retryable: true };
     }
 }
+const LAMISS_LIVE_LOG_SOURCE = 'lamiss-live-log';
+// The whole session's conversation, oldest first.
+function fetchSessionChat(learningSessionId) {
+    return callLamiss(`/api/learning-sessions/${learningSessionId}/chat`, {
+        headers: { accept: 'application/json' }
+    });
+}
+const LAMISS_START_SESSION_MESSAGE = 'lamiss:start-session';
 // Resumes the (hardcoded, local) user's open session on the video, or starts one.
 function startLearningSession(videoExternalId) {
     return callLamiss('/api/learning-sessions', {
@@ -84,6 +92,8 @@ function askLamiss(question) {
     });
 }
 // Speech to text only: used for spoken answers to Lamiss's questions.
+// language is the backend's name for what it heard ("ENGLISH", "SPANISH", …),
+// or null when it couldn't tell.
 function transcribeSpeech(audio) {
     const form = new FormData();
     const extension = audio.type === 'audio/ogg' ? 'ogg' : 'webm';

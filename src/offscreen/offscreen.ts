@@ -163,7 +163,7 @@ async function finishListening(session: ListenSession): Promise<void> {
   emitListenEvent(session.requestId, { type: 'transcribing' });
   const result = await transcribeSpeech(audio);
   if (result.ok && result.data.text?.trim()) {
-    emitListenEvent(session.requestId, { type: 'transcribed', text: result.data.text.trim() });
+    emitListenEvent(session.requestId, { type: 'transcribed', text: result.data.text.trim(), language: result.data.language ?? undefined });
   } else if (!result.ok && result.status === 422) {
     emitListenEvent(session.requestId, { type: 'no-speech' });
   } else {

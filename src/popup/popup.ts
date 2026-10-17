@@ -41,8 +41,9 @@ loadTranscriptButton?.addEventListener('click', async () => {
       return;
     }
 
+    // The extension can only read the address of YouTube tabs.
     if (!activeTab.url) {
-      setStatus('Status: Active tab has no URL');
+      setStatus('Status: Active tab is not a YouTube watch page');
       return;
     }
 

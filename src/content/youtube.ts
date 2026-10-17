@@ -645,6 +645,8 @@ type LamissQuestionState = {
   phase: LamissQuestionPhase;
   queued: boolean;
   answer?: string;
+  // Set when the answer was spoken: the language its transcription heard.
+  answerLanguage?: string;
   listenRequestId?: string;
   listenDeadline?: number;
   resumeRequested?: boolean;
@@ -756,7 +758,7 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
     // Answers are keyed on the question, so sending it again is safe.
     if (message.state === 'connected' && lamissQuestion?.phase === 'sending' && lamissQuestion.answer) {
       lamissQuestion.queued = false;
-      postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer: lamissQuestion.answer });
+      postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer: lamissQuestion.answer, language: lamissQuestion.answerLanguage });
     }
     if (message.state === 'failed') {
       console.error('Lamiss POC: live questions are off:', message.detail);
@@ -1018,7 +1020,7 @@ function onLamissListenEvent(requestId: string, event: LamissListenEvent): void 
       if (parts) {
         parts.input.value = event.text;
       }
-      submitLamissAnswer(event.text);
+      submitLamissAnswer(event.text, event.language);
       return;
     }
     case 'failed':
@@ -1288,15 +1290,17 @@ function onLamissQuestionSubmit(): void {
   submitLamissAnswer(parts.input.value.trim());
 }
 
-function submitLamissAnswer(answer: string): void {
+// spokenLanguage comes with a transcribed answer and stays off typed ones.
+function submitLamissAnswer(answer: string, spokenLanguage?: string): void {
   if (!lamissQuestion || !answer) {
     return;
   }
   lamissQuestion.phase = 'sending';
   lamissQuestion.answer = answer;
+  lamissQuestion.answerLanguage = spokenLanguage;
   lamissQuestion.error = undefined;
   renderLamissQuestion();
-  postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer });
+  postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer, language: spokenLanguage });
 }
 
 function showLamissFeedback(correct: boolean, feedback: string): void {

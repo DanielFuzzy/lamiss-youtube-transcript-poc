@@ -9,6 +9,10 @@ const chatTabId = Number(chatParams.get('tabId'));
 const chatVideoId = chatParams.get('videoId') ?? '';
 
 const chatMessages = document.getElementById('messages') as HTMLDivElement;
+// The session's conversation as Lamiss stored it; replaced on every resync.
+const chatLog = document.getElementById('log') as HTMLDivElement;
+// Questions still waiting for Lamiss's answer, or that failed, below the log.
+const chatPending = document.getElementById('pending') as HTMLDivElement;
 const chatComposer = document.getElementById('composer') as HTMLFormElement;
 const chatInput = document.getElementById('questionInput') as HTMLTextAreaElement;
 const chatSendButton = document.getElementById('sendButton') as HTMLButtonElement;
@@ -30,6 +34,8 @@ let chatBusy = false;
 let chatRecorder: MediaRecorder | null = null;
 let chatRecordingStartedAt = 0;
 let chatRecordingAutoStop: number | undefined;
+let chatLogLoading = false;
+let chatLogStale = false;
 
 type ChatQuestion = {
   interactionId: string;
@@ -46,11 +52,20 @@ function chatAddNote(text: string): void {
   const note = document.createElement('p');
   note.className = 'note';
   note.textContent = text;
-  chatMessages.append(note);
+  chatLog.append(note);
   chatScrollToEnd();
 }
 
-function chatAddMessage(from: 'user' | 'lamiss', text: string, meta: string): HTMLDivElement {
+// "14:41" from the server's "2026-10-12T14:41:02.739911", or from now.
+function chatClockTime(occurredAt?: string): string {
+  if (occurredAt) {
+    return occurredAt.slice(11, 16);
+  }
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function chatCreateMessage(from: 'user' | 'lamiss', text: string, meta: string): HTMLDivElement {
   const message = document.createElement('div');
   message.className = `message ${from}`;
 
@@ -63,9 +78,60 @@ function chatAddMessage(from: 'user' | 'lamiss', text: string, meta: string): HT
   bubble.textContent = text;
 
   message.append(metaLine, bubble);
-  chatMessages.append(message);
+  return message;
+}
+
+function chatAddMessage(from: 'user' | 'lamiss', text: string, meta: string, container: HTMLElement = chatLog): HTMLDivElement {
+  const message = chatCreateMessage(from, text, meta);
+  container.append(message);
   chatScrollToEnd();
   return message;
+}
+
+function chatSpeakerLabel(from: 'user' | 'lamiss', time: string): string {
+  return `${from === 'user' ? 'You' : 'Lamiss'} · ${time}`;
+}
+
+// Lines that happened on this page, added straight away. If the history is
+// loading meanwhile it may or may not include them, so load it once more.
+function chatAppendLive(from: 'user' | 'lamiss', text: string): HTMLDivElement {
+  if (chatLogLoading) {
+    chatLogStale = true;
+  }
+  return chatAddMessage(from, text, chatSpeakerLabel(from, chatClockTime()));
+}
+
+// Backfills the whole conversation: when the panel opens, and when the live
+// connection comes back after a drop.
+async function chatLoadLog(): Promise<void> {
+  if (chatSessionId === undefined) {
+    return;
+  }
+  if (chatLogLoading) {
+    chatLogStale = true;
+    return;
+  }
+  chatLogLoading = true;
+  try {
+    do {
+      chatLogStale = false;
+      const result = await fetchSessionChat(chatSessionId);
+      if (!result.ok) {
+        chatAddNote(`Couldn't load the conversation so far: ${result.error}`);
+        return;
+      }
+      if (chatLogStale) {
+        continue;
+      }
+      chatLog.replaceChildren(...result.data.map(entry => {
+        const from = entry.speaker === 'USER' ? 'user' : 'lamiss';
+        return chatCreateMessage(from, entry.text, chatSpeakerLabel(from, chatClockTime(entry.occurredAt)));
+      }));
+      chatScrollToEnd();
+    } while (chatLogStale);
+  } finally {
+    chatLogLoading = false;
+  }
 }
 
 function chatAddTyping(): HTMLDivElement {
@@ -78,7 +144,7 @@ function chatAddTyping(): HTMLDivElement {
   bubble.append(document.createElement('span'), document.createElement('span'), document.createElement('span'));
 
   message.append(bubble);
-  chatMessages.append(message);
+  chatPending.append(message);
   chatScrollToEnd();
   return message;
 }
@@ -105,7 +171,9 @@ async function chatStartSession(): Promise<void> {
     return;
   }
 
-  const session = await startLearningSession(chatVideoId);
+  // Through the worker, so this is the same session as Lamiss's live questions.
+  const session = await chrome.runtime.sendMessage({ type: LAMISS_START_SESSION_MESSAGE, videoId: chatVideoId })
+    .catch((error: unknown) => ({ ok: false, error: String(error), retryable: true })) as LamissCallResult<LamissLearningSession>;
   if (!session.ok) {
     chatSessionStatus.textContent = 'Could not start a session';
     chatAddNote(session.error);
@@ -119,6 +187,7 @@ async function chatStartSession(): Promise<void> {
   }
   chatRender();
   chatInput.focus();
+  await chatLoadLog();
 }
 
 // One question, from asking to answer. The user bubble stays in place; a
@@ -151,11 +220,14 @@ async function chatSend(question: ChatQuestion, userMessage: HTMLDivElement): Pr
   }
 
   if (result.ok) {
-    chatAddMessage('lamiss', result.data.answer?.trim() || 'Lamiss returned an empty answer.', 'Lamiss');
+    // Answered, so both lines are now in the session's history.
+    userMessage.remove();
+    chatAppendLive('user', userBubble.textContent ?? '');
+    chatAppendLive('lamiss', result.data.answer?.trim() || 'Lamiss returned an empty answer.');
     return;
   }
 
-  const failure = chatAddMessage('lamiss', `Lamiss couldn't answer: ${result.error}`, 'Lamiss');
+  const failure = chatAddMessage('lamiss', `Lamiss couldn't answer: ${result.error}`, 'Lamiss', chatPending);
   failure.classList.add('error');
   if (result.retryable) {
     const retry = document.createElement('button');
@@ -182,7 +254,7 @@ async function chatSendText(): Promise<void> {
   chatInput.value = '';
   chatResizeInput();
   const videoPositionMs = await readVideoPositionMs(chatTabId);
-  const userMessage = chatAddMessage('user', text, `You · ${formatVideoPosition(videoPositionMs)}`);
+  const userMessage = chatAddMessage('user', text, `You · ${formatVideoPosition(videoPositionMs)}`, chatPending);
   await chatSend({ interactionId: crypto.randomUUID(), videoPositionMs, text }, userMessage);
 }
 
@@ -223,7 +295,7 @@ async function chatStartRecording(): Promise<void> {
     }
 
     // The backend returns the transcribed question; it replaces this placeholder.
-    const userMessage = chatAddMessage('user', 'Voice question…', `You · ${formatVideoPosition(videoPositionMs)}`);
+    const userMessage = chatAddMessage('user', 'Voice question…', `You · ${formatVideoPosition(videoPositionMs)}`, chatPending);
     userMessage.querySelector('.bubble')?.classList.add('pending-voice');
     void chatSend({ interactionId: crypto.randomUUID(), videoPositionMs, audio }, userMessage);
   });
@@ -311,6 +383,29 @@ chatSettingsButton.addEventListener('click', () => {
 chatCloseButton.addEventListener('click', () => {
   // The content script owns the panel; it only accepts this from its own frame.
   window.parent.postMessage({ type: 'lamiss:close-chat' }, 'https://www.youtube.com');
+});
+
+// Lamiss's questions, the user's answers and the feedback, from the live
+// connection of the tab this panel is in.
+chrome.runtime.onMessage.addListener((message: Partial<LamissLiveLogMessage> | undefined) => {
+  if (message?.source !== LAMISS_LIVE_LOG_SOURCE || message.tabId !== chatTabId
+    || chatSessionId === undefined || message.learningSessionId !== chatSessionId || !message.event) {
+    return false;
+  }
+  const event = message.event;
+  switch (event.type) {
+    case 'lamiss-asked':
+      chatAppendLive('lamiss', event.question);
+      break;
+    case 'answered':
+      chatAppendLive('user', event.answer);
+      chatAppendLive('lamiss', event.feedback);
+      break;
+    case 'resync':
+      void chatLoadLog();
+      break;
+  }
+  return false;
 });
 
 chatRender();

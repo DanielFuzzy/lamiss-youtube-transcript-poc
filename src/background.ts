@@ -1,6 +1,6 @@
 // The worker is a classic script, so it shares the backend helpers this way.
 declare function importScripts(...urls: string[]): void;
-importScripts('shared/lamiss-api.js');
+importScripts('shared/lamiss-config.js', 'shared/lamiss-api.js');
 
 type DiscoverTracksMessage = {
   type: 'DISCOVER_CAPTION_TRACKS';
@@ -21,7 +21,7 @@ type FetchCaptionResourceMainWorldResult = {
   text: string;
 };
 
-const LAMISS_TRANSCRIPT_INGEST_ENDPOINT = 'http://localhost:8080/api/transcripts/ingest';
+const LAMISS_TRANSCRIPT_INGEST_ENDPOINT = `${LAMISS_API_BASE_URL}/api/transcripts/ingest`;
 
 type VideoPlatform = 'YOUTUBE' | 'DISNEY' | 'NETFLIX' | 'HBO' | 'PRIMEVIDEO' | 'CRUNCHYROLL';
 
@@ -44,8 +44,8 @@ type TranscriptIngestOutcome = {
   error?: string;
 };
 
-// Runs here rather than in the content script: the worker's localhost host
-// permission skips CORS, and youtube.com pages may not call localhost at all.
+// Runs here rather than in the content script: the worker's host permission
+// for the backend skips CORS, which youtube.com pages don't have.
 async function ingestTranscript(payload: TranscriptIngestPayload): Promise<TranscriptIngestOutcome> {
   try {
     const response = await fetch(LAMISS_TRANSCRIPT_INGEST_ENDPOINT, {
@@ -396,7 +396,18 @@ function isFetchCaptionResourceMessage(message: unknown): message is FetchCaptio
     return false;
   }
 
-  return typeof typed.captionUrl === 'string' && typed.captionUrl.trim().length > 0;
+  return typeof typed.captionUrl === 'string' && isYouTubeCaptionUrl(typed.captionUrl);
+}
+
+// The caption fetch runs with the user's YouTube cookies, so it may only
+// reach YouTube's caption endpoint.
+function isYouTubeCaptionUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'www.youtube.com' && url.pathname === '/api/timedtext';
+  } catch {
+    return false;
+  }
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
@@ -560,7 +571,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, _sendResponse) 
 // ---------------------------------------------------------------------------
 // Live connection for Lamiss's proactive questions. Each watch tab opens a
 // port; the worker turns it into a WebSocket to the backend, because the
-// worker can reach localhost while youtube.com pages may not. The tab's
+// worker can reach the backend while youtube.com pages may not. The tab's
 // heartbeats keep this worker alive; if it is stopped anyway, the port
 // disconnects and the tab connects again.
 // ---------------------------------------------------------------------------
@@ -583,7 +594,7 @@ type LamissLiveClientMessage =
   | { type: 'start'; videoId: string }
   // playing: false reports where a paused viewer is; it never triggers a question.
   | { type: 'position'; positionMs: number; playing?: boolean }
-  | { type: 'answer'; answeredTo: string; answer: string }
+  | { type: 'answer'; answeredTo: string; answer: string; language?: string }
   | { type: 'listen'; requestId: string }
   | { type: 'stop-listening'; requestId: string; discard: boolean }
   | { type: 'speak'; requestId: string; text: string; language?: string }
@@ -596,7 +607,7 @@ type LamissListenEvent =
   | { type: 'speech-started' }
   | { type: 'no-speech' }
   | { type: 'transcribing' }
-  | { type: 'transcribed'; text: string }
+  | { type: 'transcribed'; text: string; language?: string }
   | { type: 'failed'; error: string; micDenied?: boolean };
 
 type LamissLiveState = 'connecting' | 'connected' | 'reconnecting' | 'failed';
@@ -618,6 +629,9 @@ type LamissLiveConnection = {
   videoId?: string;
   learningSessionId?: number;
   socket?: WebSocket;
+  // The last answer sent, shown in the chat panel next to its feedback.
+  lastAnswer?: string;
+  connectedBefore?: boolean;
   attempt: number;
   retryTimer?: ReturnType<typeof setTimeout>;
   closed: boolean;
@@ -678,13 +692,46 @@ function scheduleLiveReconnect(live: LamissLiveConnection, detail: string): void
   live.retryTimer = setTimeout(() => void connectLive(live), delay);
 }
 
+// The live connection and the chat panel both need the video's session and
+// ask for it at the same moment; separate requests would make the backend
+// start two sessions, splitting the conversation. They share one request.
+const learningSessionRequests = new Map<string, Promise<LamissCallResult<LamissLearningSession>>>();
+
+function startSharedLearningSession(videoId: string): Promise<LamissCallResult<LamissLearningSession>> {
+  let request = learningSessionRequests.get(videoId);
+  if (!request) {
+    request = startLearningSession(videoId).finally(() => learningSessionRequests.delete(videoId));
+    learningSessionRequests.set(videoId, request);
+  }
+  return request;
+}
+
+chrome.runtime.onMessage.addListener((message: { type?: string; videoId?: unknown }, _sender, sendResponse) => {
+  if (message?.type !== LAMISS_START_SESSION_MESSAGE || typeof message.videoId !== 'string') {
+    return false;
+  }
+  void startSharedLearningSession(message.videoId).then(sendResponse);
+  return true;
+});
+
+// Mirrors the live conversation into the tab's chat panel, if it's open.
+function postLiveLog(live: LamissLiveConnection, event: LamissLiveLogEvent): void {
+  const tabId = live.port.sender?.tab?.id;
+  if (tabId === undefined || live.learningSessionId === undefined) {
+    return;
+  }
+  const message: LamissLiveLogMessage = { source: LAMISS_LIVE_LOG_SOURCE, tabId, learningSessionId: live.learningSessionId, event };
+  // Rejects when no chat panel is open to receive it.
+  void chrome.runtime.sendMessage(message).catch(() => undefined);
+}
+
 async function connectLive(live: LamissLiveConnection): Promise<void> {
   if (live.closed || !live.videoId) {
     return;
   }
 
   if (live.learningSessionId === undefined) {
-    const session = await startLearningSession(live.videoId);
+    const session = await startSharedLearningSession(live.videoId);
     if (live.closed) {
       return;
     }
@@ -707,6 +754,10 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
     live.attempt = 0;
     void sendQuestionSettings(socket);
     postLive(live, { type: 'status', state: 'connected' });
+    if (live.connectedBefore) {
+      postLiveLog(live, { type: 'resync' });
+    }
+    live.connectedBefore = true;
     void readPendingQuestion(learningSessionId).then((pending) => {
       if (pending && live.socket === socket) {
         postLive(live, { type: 'server', message: { type: 'PAUSE_VIDEO' } });
@@ -726,9 +777,15 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
 
     if (message.type === 'ASK_QUESTION') {
       void chrome.storage.local.set({ [pendingQuestionKey(learningSessionId)]: { eventId: message.eventId, question: message.question } });
+      postLiveLog(live, { type: 'lamiss-asked', question: message.question });
     } else if (message.type === 'FEEDBACK') {
       // Feedback means the backend has stored the answer.
       void chrome.storage.local.remove(pendingQuestionKey(learningSessionId));
+      // A restarted worker has lost the answer; the history has it.
+      postLiveLog(live, live.lastAnswer === undefined
+        ? { type: 'resync' }
+        : { type: 'answered', answer: live.lastAnswer, feedback: message.feedback });
+      live.lastAnswer = undefined;
     } else if (message.type === 'ERROR') {
       console.warn('Lamiss POC: Lamiss reported an error:', message.message);
     }
@@ -773,7 +830,14 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
     case 'answer':
       // While offline the tab keeps the answer and sends it again on 'connected'.
       if (socket) {
-        socket.send(JSON.stringify({ type: 'ANSWER', answeredTo: message.answeredTo, answer: message.answer }));
+        live.lastAnswer = message.answer;
+        // language only comes with a spoken answer: what the transcription heard.
+        socket.send(JSON.stringify({
+          type: 'ANSWER',
+          answeredTo: message.answeredTo,
+          answer: message.answer,
+          ...(message.language ? { language: message.language } : {})
+        }));
       } else {
         postLive(live, { type: 'answer-queued' });
       }

@@ -610,7 +610,7 @@ function onLamissLiveMessage(message) {
         // Answers are keyed on the question, so sending it again is safe.
         if (message.state === 'connected' && lamissQuestion?.phase === 'sending' && lamissQuestion.answer) {
             lamissQuestion.queued = false;
-            postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer: lamissQuestion.answer });
+            postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer: lamissQuestion.answer, language: lamissQuestion.answerLanguage });
         }
         if (message.state === 'failed') {
             console.error('Lamiss POC: live questions are off:', message.detail);
@@ -854,7 +854,7 @@ function onLamissListenEvent(requestId, event) {
             if (parts) {
                 parts.input.value = event.text;
             }
-            submitLamissAnswer(event.text);
+            submitLamissAnswer(event.text, event.language);
             return;
         }
         case 'failed':
@@ -1089,15 +1089,17 @@ function onLamissQuestionSubmit() {
     stopLamissListening(true);
     submitLamissAnswer(parts.input.value.trim());
 }
-function submitLamissAnswer(answer) {
+// spokenLanguage comes with a transcribed answer and stays off typed ones.
+function submitLamissAnswer(answer, spokenLanguage) {
     if (!lamissQuestion || !answer) {
         return;
     }
     lamissQuestion.phase = 'sending';
     lamissQuestion.answer = answer;
+    lamissQuestion.answerLanguage = spokenLanguage;
     lamissQuestion.error = undefined;
     renderLamissQuestion();
-    postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer });
+    postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer, language: spokenLanguage });
 }
 function showLamissFeedback(correct, feedback) {
     const parts = lamissQuestionParts();

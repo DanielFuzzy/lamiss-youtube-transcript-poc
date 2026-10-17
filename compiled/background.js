@@ -478,12 +478,41 @@ function scheduleLiveReconnect(live, detail) {
     postLive(live, { type: 'status', state: 'reconnecting', detail });
     live.retryTimer = setTimeout(() => void connectLive(live), delay);
 }
+// The live connection and the chat panel both need the video's session and
+// ask for it at the same moment; separate requests would make the backend
+// start two sessions, splitting the conversation. They share one request.
+const learningSessionRequests = new Map();
+function startSharedLearningSession(videoId) {
+    let request = learningSessionRequests.get(videoId);
+    if (!request) {
+        request = startLearningSession(videoId).finally(() => learningSessionRequests.delete(videoId));
+        learningSessionRequests.set(videoId, request);
+    }
+    return request;
+}
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== LAMISS_START_SESSION_MESSAGE || typeof message.videoId !== 'string') {
+        return false;
+    }
+    void startSharedLearningSession(message.videoId).then(sendResponse);
+    return true;
+});
+// Mirrors the live conversation into the tab's chat panel, if it's open.
+function postLiveLog(live, event) {
+    const tabId = live.port.sender?.tab?.id;
+    if (tabId === undefined || live.learningSessionId === undefined) {
+        return;
+    }
+    const message = { source: LAMISS_LIVE_LOG_SOURCE, tabId, learningSessionId: live.learningSessionId, event };
+    // Rejects when no chat panel is open to receive it.
+    void chrome.runtime.sendMessage(message).catch(() => undefined);
+}
 async function connectLive(live) {
     if (live.closed || !live.videoId) {
         return;
     }
     if (live.learningSessionId === undefined) {
-        const session = await startLearningSession(live.videoId);
+        const session = await startSharedLearningSession(live.videoId);
         if (live.closed) {
             return;
         }
@@ -505,6 +534,10 @@ async function connectLive(live) {
         live.attempt = 0;
         void sendQuestionSettings(socket);
         postLive(live, { type: 'status', state: 'connected' });
+        if (live.connectedBefore) {
+            postLiveLog(live, { type: 'resync' });
+        }
+        live.connectedBefore = true;
         void readPendingQuestion(learningSessionId).then((pending) => {
             if (pending && live.socket === socket) {
                 postLive(live, { type: 'server', message: { type: 'PAUSE_VIDEO' } });
@@ -523,10 +556,16 @@ async function connectLive(live) {
         }
         if (message.type === 'ASK_QUESTION') {
             void chrome.storage.local.set({ [pendingQuestionKey(learningSessionId)]: { eventId: message.eventId, question: message.question } });
+            postLiveLog(live, { type: 'lamiss-asked', question: message.question });
         }
         else if (message.type === 'FEEDBACK') {
             // Feedback means the backend has stored the answer.
             void chrome.storage.local.remove(pendingQuestionKey(learningSessionId));
+            // A restarted worker has lost the answer; the history has it.
+            postLiveLog(live, live.lastAnswer === undefined
+                ? { type: 'resync' }
+                : { type: 'answered', answer: live.lastAnswer, feedback: message.feedback });
+            live.lastAnswer = undefined;
         }
         else if (message.type === 'ERROR') {
             console.warn('Lamiss POC: Lamiss reported an error:', message.message);
@@ -569,7 +608,14 @@ function onLiveClientMessage(live, message) {
         case 'answer':
             // While offline the tab keeps the answer and sends it again on 'connected'.
             if (socket) {
-                socket.send(JSON.stringify({ type: 'ANSWER', answeredTo: message.answeredTo, answer: message.answer }));
+                live.lastAnswer = message.answer;
+                // language only comes with a spoken answer: what the transcription heard.
+                socket.send(JSON.stringify({
+                    type: 'ANSWER',
+                    answeredTo: message.answeredTo,
+                    answer: message.answer,
+                    ...(message.language ? { language: message.language } : {})
+                }));
             }
             else {
                 postLive(live, { type: 'answer-queued' });

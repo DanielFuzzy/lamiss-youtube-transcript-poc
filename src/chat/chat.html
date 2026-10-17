@@ -123,6 +123,12 @@
       scrollbar-color: rgba(196, 167, 255, 0.25) transparent;
     }
 
+    /* Their lines lay out as part of the message list. */
+    #log,
+    #pending {
+      display: contents;
+    }
+
     .note {
       align-self: center;
       max-width: 90%;
@@ -436,7 +442,9 @@
   </section>
 
   <div id="messages" role="log" aria-live="polite" aria-label="Conversation with Lamiss">
-    <p class="note">Ask Lamiss anything about this video. Your question is tied to the moment you ask it.</p>
+    <p class="note">Ask Lamiss anything about this video. Your question is tied to the moment you ask it. Lamiss's questions and your answers show up here too.</p>
+    <div id="log"></div>
+    <div id="pending"></div>
   </div>
 
   <form id="composer">
@@ -460,6 +468,7 @@
     </button>
   </form>
 
+  <script src="../shared/lamiss-config.js"></script>
   <script src="../shared/lamiss-api.js"></script>
   <script src="chat.js"></script>
 </body>
