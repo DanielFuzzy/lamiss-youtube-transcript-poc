@@ -372,14 +372,19 @@ function isValidCaptionResponse(response: unknown): response is { events: Array<
 
 const LAMISS_PAGE_BUTTON_ID = 'lamiss-start-button';
 
-type LamissButtonState = 'idle' | 'loading' | 'ready' | 'error';
+type LamissButtonState = 'idle' | 'loading' | 'ready' | 'error' | 'signed-out' | 'signing-in';
 
 const LAMISS_BUTTON_LABELS: Record<LamissButtonState, string> = {
   idle: 'Start using Lamiss',
   loading: 'Loading transcript…',
   ready: 'Lamiss is ready',
-  error: 'Retry Lamiss'
+  error: 'Retry Lamiss',
+  'signed-out': 'Sign in to use Lamiss',
+  'signing-in': 'Signing in…'
 };
+
+const LAMISS_BUTTON_IDLE_DETAIL = 'Send this video\'s transcript to Lamiss';
+const LAMISS_BUTTON_SIGNED_OUT_DETAIL = 'Sign in with Google to use Lamiss';
 
 const LAMISS_CHAT_FRAME_ID = 'lamiss-chat-frame';
 
@@ -387,8 +392,14 @@ let lamissButtonVideoId: string | undefined;
 let lamissButtonState: LamissButtonState = 'idle';
 let lamissTabId: number | undefined;
 let lamissChatOpen = false;
-let lamissButtonDetail = 'Send this video\'s transcript to Lamiss';
+let lamissButtonDetail = LAMISS_BUTTON_IDLE_DETAIL;
 let lamissEnsureScheduled = false;
+// Only the status reaches this script: the token stays in the worker. Unknown
+// until the worker answers; a call without a sign-in then reports it.
+let lamissAuthStatus: LamissAuthState['status'] | undefined;
+// Lamiss was ready on this video when the sign-in ended: signing in again
+// brings it back without loading the transcript again.
+let lamissResumeAfterSignIn: { videoId: string; language?: string } | undefined;
 
 function createLamissButton(): HTMLButtonElement {
   const button = document.createElement('button');
@@ -415,7 +426,7 @@ function createLamissButton(): HTMLButtonElement {
 function renderLamissButton(button: HTMLButtonElement): void {
   if (button.dataset.state !== lamissButtonState) {
     button.dataset.state = lamissButtonState;
-    button.disabled = lamissButtonState === 'loading';
+    button.disabled = lamissButtonState === 'loading' || lamissButtonState === 'signing-in';
   }
   if (button.title !== lamissButtonDetail) {
     button.title = lamissButtonDetail;
@@ -439,8 +450,10 @@ function ensureLamissButton(): void {
 
   if (parsed.videoId !== lamissButtonVideoId) {
     lamissButtonVideoId = parsed.videoId;
-    lamissButtonState = 'idle';
-    lamissButtonDetail = 'Send this video\'s transcript to Lamiss';
+    const signedOut = lamissAuthStatus === 'signedOut' || lamissAuthStatus === 'expired';
+    lamissButtonState = signedOut ? 'signed-out' : 'idle';
+    lamissButtonDetail = signedOut ? LAMISS_BUTTON_SIGNED_OUT_DETAIL : LAMISS_BUTTON_IDLE_DETAIL;
+    lamissResumeAfterSignIn = undefined;
     lamissChatOpen = false;
     stopLamissLive();
   }
@@ -467,7 +480,10 @@ function ensureLamissButton(): void {
 function ensureLamissChat(): void {
   const existing = document.getElementById(LAMISS_CHAT_FRAME_ID) as HTMLIFrameElement | null;
   const videoId = lamissButtonVideoId;
-  if (!lamissChatOpen || lamissButtonState !== 'ready' || lamissTabId === undefined || !videoId) {
+  // An open chat stays while signed out: it shows its own sign-in button.
+  const keptForSignIn = existing?.dataset.videoId === videoId
+    && (lamissButtonState === 'signed-out' || lamissButtonState === 'signing-in');
+  if (!lamissChatOpen || (lamissButtonState !== 'ready' && !keptForSignIn) || lamissTabId === undefined || !videoId) {
     existing?.remove();
     return;
   }
@@ -554,7 +570,76 @@ function sendTranscriptIngestRequest(payload: TranscriptIngestPayload): Promise<
   });
 }
 
+// The worker opens Google's sign-in window and keeps the result.
+async function signInFromLamissButton(): Promise<void> {
+  setLamissButtonState('signing-in', 'Continue in the Google window');
+  const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
+    .catch((error: unknown) => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
+  if (result?.ok) {
+    applyLamissAuthStatus('signedIn');
+    return;
+  }
+  setLamissButtonState('signed-out', result?.error ?? 'Sign-in failed. Click to try again');
+  if (result?.reason !== 'cancelled') {
+    showLamissToast(result?.error ?? 'Sign-in failed. Please try again.');
+  }
+}
+
+function applyLamissAuthStatus(status: LamissAuthState['status']): void {
+  lamissAuthStatus = status;
+  if (status === 'signedIn') {
+    if (lamissButtonState !== 'signed-out' && lamissButtonState !== 'signing-in') {
+      return;
+    }
+    const resume = lamissResumeAfterSignIn;
+    lamissResumeAfterSignIn = undefined;
+    if (resume && resume.videoId === lamissButtonVideoId) {
+      setLamissButtonState('ready', 'Click to show or hide the chat');
+      startLamissLive(resume.videoId, resume.language);
+    } else {
+      setLamissButtonState('idle', LAMISS_BUTTON_IDLE_DETAIL);
+    }
+    ensureLamissChat();
+    return;
+  }
+
+  if (lamissButtonState === 'ready' && lamissButtonVideoId) {
+    lamissResumeAfterSignIn = { videoId: lamissButtonVideoId, language: lamissLiveLanguage };
+  }
+  stopLamissLive();
+  if (lamissButtonState !== 'signing-in') {
+    setLamissButtonState('signed-out', status === 'expired'
+      ? 'Your Lamiss session ended. Click to sign in again'
+      : LAMISS_BUTTON_SIGNED_OUT_DETAIL);
+  }
+  ensureLamissChat();
+}
+
+chrome.runtime.onMessage.addListener((message: { type?: string; state?: { status?: unknown } } | undefined, sender) => {
+  if (message?.type !== LAMISS_AUTH_CHANGED_MESSAGE || sender.id !== chrome.runtime.id) {
+    return false;
+  }
+  const status = message.state?.status;
+  if (status === 'signedIn' || status === 'signedOut' || status === 'expired') {
+    applyLamissAuthStatus(status);
+  }
+  return false;
+});
+
+void chrome.runtime.sendMessage({ type: LAMISS_AUTH_STATE_MESSAGE })
+  .then((state?: { status?: unknown }) => {
+    const status = state?.status;
+    if (status === 'signedIn' || status === 'signedOut' || status === 'expired') {
+      applyLamissAuthStatus(status);
+    }
+  })
+  .catch(() => undefined);
+
 async function onLamissButtonClick(): Promise<void> {
+  if (lamissButtonState === 'signed-out') {
+    await signInFromLamissButton();
+    return;
+  }
   if (lamissButtonState === 'ready') {
     setLamissChatOpen(!lamissChatOpen);
     return;
@@ -598,6 +683,12 @@ async function onLamissButtonClick(): Promise<void> {
 
     if (!outcome.ok) {
       console.error('Lamiss POC: transcript ingest failed:', outcome.error ?? outcome.status);
+      if (outcome.signInRequired) {
+        if (lamissButtonVideoId === clickedVideoId) {
+          applyLamissAuthStatus(lamissAuthStatus === 'signedIn' ? 'expired' : 'signedOut');
+        }
+        return;
+      }
       finish('error', outcome.error ?? `Lamiss backend returned HTTP ${outcome.status}`);
       return;
     }

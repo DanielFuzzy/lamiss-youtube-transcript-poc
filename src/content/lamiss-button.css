@@ -45,12 +45,14 @@
   background: #ffffff;
 }
 
-.lamiss-start-button[data-state="loading"] {
+.lamiss-start-button[data-state="loading"],
+.lamiss-start-button[data-state="signing-in"] {
   cursor: progress;
   filter: saturate(0.85);
 }
 
-.lamiss-start-button[data-state="loading"] .lamiss-start-button__logo {
+.lamiss-start-button[data-state="loading"] .lamiss-start-button__logo,
+.lamiss-start-button[data-state="signing-in"] .lamiss-start-button__logo {
   animation: lamiss-start-button-pulse 1s ease-in-out infinite;
 }
 

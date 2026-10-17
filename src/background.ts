@@ -1,6 +1,81 @@
 // The worker is a classic script, so it shares the backend helpers this way.
 declare function importScripts(...urls: string[]): void;
-importScripts('shared/lamiss-config.js', 'shared/lamiss-api.js');
+importScripts('shared/lamiss-config.js', 'shared/lamiss-api.js', 'shared/lamiss-auth.js');
+
+// ---------------------------------------------------------------------------
+// Who may talk to the worker. Only this extension: its own pages (popup, chat,
+// offscreen) may send anything; the content script on youtube.com, which runs
+// next to an untrusted page, only the messages it needs, about its own tab.
+// ---------------------------------------------------------------------------
+
+type LamissSenderKind = 'extension' | 'content' | 'untrusted';
+
+const LAMISS_CONTENT_SCRIPT_MESSAGES = new Set<string>([
+  'GET_SENDER_TAB_ID',
+  'INGEST_TRANSCRIPT',
+  'DISCOVER_CAPTION_TRACKS',
+  'FETCH_CAPTION_RESOURCE_MAIN_WORLD',
+  LAMISS_SIGN_IN_MESSAGE,
+  LAMISS_AUTH_STATE_MESSAGE
+]);
+
+function isYouTubePageUrl(value: string | undefined): boolean {
+  try {
+    const url = new URL(value ?? '');
+    return url.protocol === 'https:' && url.hostname === 'www.youtube.com';
+  } catch {
+    return false;
+  }
+}
+
+function classifyLamissSender(sender: chrome.runtime.MessageSender | undefined): LamissSenderKind {
+  if (!sender || sender.id !== chrome.runtime.id) {
+    return 'untrusted';
+  }
+  if (typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''))) {
+    return 'extension';
+  }
+  if (sender.tab?.id !== undefined && isYouTubePageUrl(sender.url)) {
+    return 'content';
+  }
+  return 'untrusted';
+}
+
+function isAllowedLamissMessage(message: unknown, sender: chrome.runtime.MessageSender): boolean {
+  const kind = classifyLamissSender(sender);
+  if (kind === 'extension') {
+    return true;
+  }
+  if (kind !== 'content') {
+    return false;
+  }
+  const typed = message as { type?: unknown; tabId?: unknown } | null;
+  if (typeof typed?.type !== 'string' || !LAMISS_CONTENT_SCRIPT_MESSAGES.has(typed.type)) {
+    return false;
+  }
+  // A content script only ever acts on its own tab.
+  return typed.tabId === undefined || typed.tabId === sender.tab?.id;
+}
+
+type LamissMessageListener = (message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) => boolean | undefined;
+
+// Every message listener of the worker goes through this check.
+function addLamissMessageListener(listener: LamissMessageListener): void {
+  chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+    if (!isAllowedLamissMessage(message, sender)) {
+      return false;
+    }
+    return listener(message, sender, sendResponse);
+  });
+}
+
+chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (!isAllowedLamissMessage(message, sender)) {
+    const type = (message as { type?: unknown } | null)?.type;
+    console.warn('Lamiss POC: ignored a message from an unexpected sender:', typeof type === 'string' ? type : 'unknown');
+  }
+  return false;
+});
 
 type DiscoverTracksMessage = {
   type: 'DISCOVER_CAPTION_TRACKS';
@@ -42,20 +117,31 @@ type TranscriptIngestOutcome = {
   status?: number;
   ingestStatus?: string;
   error?: string;
+  // Signed out, or the session ran out: signing in again is the fix.
+  signInRequired?: boolean;
 };
 
 // Runs here rather than in the content script: the worker's host permission
 // for the backend skips CORS, which youtube.com pages don't have.
 async function ingestTranscript(payload: TranscriptIngestPayload): Promise<TranscriptIngestOutcome> {
+  const accessToken = await readAccessToken();
+  if (!accessToken) {
+    return { ok: false, status: 401, error: LAMISS_SIGN_IN_REQUIRED_MESSAGE, signInRequired: true };
+  }
   try {
-    const response = await fetch(LAMISS_TRANSCRIPT_INGEST_ENDPOINT, {
+    const response = await fetch(LAMISS_TRANSCRIPT_INGEST_ENDPOINT, withAuthorization({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    });
+    }, accessToken));
+
+    if (response.status === 401) {
+      const rejected = await lamissUnauthorized(accessToken);
+      return { ok: false, status: rejected.status, error: rejected.error, signInRequired: true };
+    }
 
     if (!response.ok) {
-      console.log('Lamiss POC: transcript ingest HTTP status =', response.status, await response.text());
+      console.log('Lamiss POC: transcript ingest HTTP status =', response.status);
       return { ok: false, status: response.status };
     }
 
@@ -67,7 +153,7 @@ async function ingestTranscript(payload: TranscriptIngestPayload): Promise<Trans
   }
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+addLamissMessageListener((message: unknown, sender, sendResponse) => {
   const type = (message as { type?: unknown } | null)?.type;
 
   if (type === 'GET_SENDER_TAB_ID') {
@@ -410,7 +496,7 @@ function isYouTubeCaptionUrl(value: string): boolean {
   }
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+addLamissMessageListener((message: unknown, _sender, sendResponse) => {
   if (!isFetchCaptionResourceMessage(message)) {
     return false;
   }
@@ -490,7 +576,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   return true;
 });
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, _sendResponse) => {
+addLamissMessageListener((message: unknown, _sender, _sendResponse) => {
   if (!isDiscoverTracksMessage(message)) {
     if ((message as { type?: unknown } | null)?.type === 'DISCOVER_CAPTION_TRACKS') {
       console.log('Lamiss POC: malformed DISCOVER_CAPTION_TRACKS message received');
@@ -579,6 +665,8 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, _sendResponse) 
 const LAMISS_LIVE_PORT_NAME = 'lamiss-live';
 const LAMISS_LIVE_MAX_BACKOFF_MS = 30_000;
 const WEBSOCKET_POLICY_VIOLATION = 1008;
+// The ticket or the sign-in behind it was not accepted (TDR-0001).
+const WEBSOCKET_UNAUTHENTICATED = 4401;
 
 type LamissServerMessage =
   | { type: 'PAUSE_VIDEO' }
@@ -635,6 +723,10 @@ type LamissLiveConnection = {
   attempt: number;
   retryTimer?: ReturnType<typeof setTimeout>;
   closed: boolean;
+  // The access token the current socket's ticket was obtained with.
+  accessToken?: string;
+  // Bumped by every new connection attempt; an older attempt stops at its next step.
+  generation: number;
 };
 
 const liveConnections = new Set<LamissLiveConnection>();
@@ -706,7 +798,7 @@ function startSharedLearningSession(videoId: string): Promise<LamissCallResult<L
   return request;
 }
 
-chrome.runtime.onMessage.addListener((message: { type?: string; videoId?: unknown }, _sender, sendResponse) => {
+addLamissMessageListener((message: { type?: string; videoId?: unknown }, _sender, sendResponse) => {
   if (message?.type !== LAMISS_START_SESSION_MESSAGE || typeof message.videoId !== 'string') {
     return false;
   }
@@ -729,10 +821,22 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
   if (live.closed || !live.videoId) {
     return;
   }
+  const generation = ++live.generation;
+  const superseded = () => live.closed || live.generation !== generation;
+
+  // Signed out: nothing to connect to until the user signs in.
+  const accessToken = await readAccessToken();
+  if (superseded()) {
+    return;
+  }
+  if (!accessToken) {
+    postLive(live, { type: 'status', state: 'failed', detail: LAMISS_SIGN_IN_REQUIRED_MESSAGE });
+    return;
+  }
 
   if (live.learningSessionId === undefined) {
     const session = await startSharedLearningSession(live.videoId);
-    if (live.closed) {
+    if (superseded()) {
       return;
     }
     if (!session.ok) {
@@ -747,8 +851,28 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
   }
 
   const learningSessionId = live.learningSessionId;
-  const socket = new WebSocket(`${LAMISS_WS_BASE_URL}/ws/learning-sessions/${learningSessionId}/${LAMISS_USER_ID}`);
+  // A single-use ticket proves who opens the socket; it is valid for 30 s.
+  const ticket = await callLamiss<{ ticket: string; expiresAt: string }>('/api/auth/ws-ticket', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ learningSessionId })
+  }, { accessToken });
+  if (superseded()) {
+    return;
+  }
+  if (!ticket.ok || typeof ticket.data?.ticket !== 'string') {
+    const detail = ticket.ok ? 'Lamiss sent no connection ticket' : ticket.error;
+    if (!ticket.ok && ticket.retryable) {
+      scheduleLiveReconnect(live, detail);
+    } else {
+      postLive(live, { type: 'status', state: 'failed', detail });
+    }
+    return;
+  }
+
+  const socket = new WebSocket(`${LAMISS_WS_BASE_URL}/ws/learning-sessions/${learningSessionId}?ticket=${encodeURIComponent(ticket.data.ticket)}`);
   live.socket = socket;
+  live.accessToken = accessToken;
 
   socket.addEventListener('open', () => {
     live.attempt = 0;
@@ -797,6 +921,10 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
       return;
     }
     live.socket = undefined;
+    if (event.code === WEBSOCKET_UNAUTHENTICATED) {
+      void onLiveUnauthenticated(live, accessToken);
+      return;
+    }
     if (event.code === WEBSOCKET_POLICY_VIOLATION) {
       // Not a participant of the session: retrying can't fix that.
       console.error('Lamiss POC: Lamiss refused the live connection:', event.reason);
@@ -805,6 +933,44 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
     }
     scheduleLiveReconnect(live, event.reason || 'The connection to Lamiss dropped');
   });
+}
+
+// Close code 4401 for a socket opened with socketToken. If the user has
+// signed in again since, this is the old session: move to the new one.
+// Otherwise the sign-in was revoked or ran out, and reconnecting can't fix it.
+async function onLiveUnauthenticated(live: LamissLiveConnection, socketToken: string): Promise<void> {
+  const current = await readAccessToken();
+  if (live.closed) {
+    return;
+  }
+  if (current && current !== socketToken) {
+    live.learningSessionId = undefined;
+    void connectLive(live);
+    return;
+  }
+  console.error('Lamiss POC: Lamiss did not accept the sign-in for the live connection');
+  postLive(live, { type: 'status', state: 'failed', detail: LAMISS_SIGN_IN_AGAIN_MESSAGE });
+  await lamissOnSessionRejected(socketToken);
+}
+
+// A new session was stored: sockets (or attempts that failed) under any other
+// token move to it.
+function reconnectLiveConnections(accessToken: string): void {
+  for (const live of liveConnections) {
+    if (live.closed || !live.videoId || live.accessToken === accessToken) {
+      continue;
+    }
+    clearTimeout(live.retryTimer);
+    const socket = live.socket;
+    // Cleared first, so its close event is ignored.
+    live.socket = undefined;
+    live.accessToken = undefined;
+    socket?.close(1000, 'Signed in again');
+    live.learningSessionId = undefined;
+    live.attempt = 0;
+    postLive(live, { type: 'status', state: 'connecting' });
+    void connectLive(live);
+  }
 }
 
 function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClientMessage): void {
@@ -844,8 +1010,12 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
       break;
     case 'listen':
       listeningPorts.set(message.requestId, live);
-      void ensureOffscreenRecorder()
-        .then(() => chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'listen', requestId: message.requestId }))
+      // The offscreen document can't read the token; it comes with the request.
+      void readAccessTokenForOffscreen()
+        .then(async (accessToken) => {
+          await ensureOffscreenRecorder();
+          await chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'listen', requestId: message.requestId, accessToken });
+        })
         .catch((error: unknown) => {
           listeningPorts.delete(message.requestId);
           postLive(live, {
@@ -856,13 +1026,25 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
         });
       break;
     case 'stop-listening':
+      void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'stop-listening', requestId: message.requestId, discard: message.discard === true }).catch(() => undefined);
+      break;
     case 'stop-speaking':
-      void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', ...message }).catch(() => undefined);
+      void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'stop-speaking', requestId: message.requestId }).catch(() => undefined);
       break;
     case 'speak':
       speakingPorts.set(message.requestId, live);
-      void ensureOffscreenRecorder()
-        .then(() => chrome.runtime.sendMessage({ target: 'lamiss-offscreen', ...message }))
+      void readAccessTokenForOffscreen()
+        .then(async (accessToken) => {
+          await ensureOffscreenRecorder();
+          await chrome.runtime.sendMessage({
+            target: 'lamiss-offscreen',
+            type: 'speak',
+            requestId: message.requestId,
+            text: message.text,
+            language: message.language,
+            accessToken
+          });
+        })
         .catch((error: unknown) => {
           speakingPorts.delete(message.requestId);
           postLive(live, {
@@ -882,8 +1064,14 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== LAMISS_LIVE_PORT_NAME) {
     return;
   }
+  // Only the content script of a YouTube tab opens the live connection.
+  if (classifyLamissSender(port.sender) !== 'content') {
+    console.warn('Lamiss POC: refused a live connection from an unexpected sender');
+    port.disconnect();
+    return;
+  }
 
-  const live: LamissLiveConnection = { port, attempt: 0, closed: false };
+  const live: LamissLiveConnection = { port, attempt: 0, closed: false, generation: 0 };
   liveConnections.add(live);
   port.onMessage.addListener((message: LamissLiveClientMessage) => onLiveClientMessage(live, message));
   port.onDisconnect.addListener(() => {
@@ -922,7 +1110,7 @@ async function ensureOffscreenRecorder(): Promise<void> {
   await offscreenRecorderCreating;
 }
 
-chrome.runtime.onMessage.addListener((message: { source?: string; requestId?: string; speech?: LamissSpeechEvent }) => {
+addLamissMessageListener((message: { source?: string; requestId?: string; speech?: LamissSpeechEvent }) => {
   if (message?.source !== 'lamiss-offscreen' || !message.requestId || !message.speech) {
     return false;
   }
@@ -936,7 +1124,7 @@ chrome.runtime.onMessage.addListener((message: { source?: string; requestId?: st
   return false;
 });
 
-chrome.runtime.onMessage.addListener((message: { source?: string; requestId?: string; event?: LamissListenEvent }) => {
+addLamissMessageListener((message: { source?: string; requestId?: string; event?: LamissListenEvent }) => {
   if (message?.source !== 'lamiss-offscreen' || !message.requestId || !message.event) {
     return false;
   }
@@ -953,4 +1141,254 @@ chrome.runtime.onMessage.addListener((message: { source?: string; requestId?: st
     postLive(live, { type: 'listen-event', requestId: message.requestId, event });
   }
   return false;
+});
+
+// ---------------------------------------------------------------------------
+// Google sign-in (TDR-0001). The worker owns it: it asks the backend for a
+// nonce, runs Google's sign-in in chrome.identity's window, checks the state
+// it sent, and exchanges Google's ID token for a Lamiss access token, which
+// stays in chrome.storage.session. Content scripts never receive the token.
+// ---------------------------------------------------------------------------
+
+// Silent sign-ins are rare: on browser start, and when a session runs out.
+const LAMISS_SILENT_SIGN_IN_KEY = 'lamissSilentSignInAt';
+const LAMISS_SILENT_SIGN_IN_INTERVAL_MS = 5 * 60_000;
+const LAMISS_SILENT_SIGN_IN_TIMEOUT_MS = 10_000;
+
+type LamissNonceResponse = { nonce: string; expiresAt: string };
+
+// Chrome's default, set explicitly: content scripts must never read the token.
+void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => undefined);
+
+lamissOnSessionRejected = async (rejectedToken) => {
+  if (await rejectAuthSession(rejectedToken)) {
+    void trySilentSignIn();
+  }
+};
+
+async function readAccessTokenForOffscreen(): Promise<string> {
+  const accessToken = await readAccessToken();
+  if (!accessToken) {
+    throw new Error(LAMISS_SIGN_IN_REQUIRED_MESSAGE);
+  }
+  return accessToken;
+}
+
+function launchGoogleAuthFlow(url: string, interactive: boolean): Promise<string | undefined> {
+  return chrome.identity.launchWebAuthFlow(interactive
+    ? { url, interactive: true }
+    // Google may finish a prompt=none flow with a script redirect, so the
+    // flow waits for it instead of stopping at the first page load.
+    : { url, interactive: false, abortOnLoadForNonInteractive: false, timeoutMsForNonInteractive: LAMISS_SILENT_SIGN_IN_TIMEOUT_MS });
+}
+
+async function runGoogleSignIn(interactive: boolean): Promise<LamissSignInResult> {
+  if (!LAMISS_GOOGLE_CLIENT_ID) {
+    return { ok: false, reason: 'not_configured', error: 'Google sign-in is not set up in this build (LAMISS_GOOGLE_CLIENT_ID).' };
+  }
+
+  const nonce = await callLamiss<LamissNonceResponse>('/api/auth/nonce', {
+    method: 'POST',
+    headers: { accept: 'application/json' }
+  }, { anonymous: true });
+  if (!nonce.ok || typeof nonce.data?.nonce !== 'string') {
+    return { ok: false, reason: 'failed', error: nonce.ok ? 'Lamiss could not start the sign-in.' : nonce.error };
+  }
+
+  const state = randomUrlSafeString();
+  const redirectUri = chrome.identity.getRedirectURL();
+  const url = buildGoogleAuthUrl({ clientId: LAMISS_GOOGLE_CLIENT_ID, redirectUri, nonce: nonce.data.nonce, state, interactive });
+
+  let redirect: string | undefined;
+  try {
+    redirect = await launchGoogleAuthFlow(url, interactive);
+  } catch (error) {
+    return { ok: false, ...describeAuthFlowError(error, interactive) };
+  }
+  if (!redirect) {
+    return { ok: false, reason: 'cancelled', error: 'Sign-in was cancelled.' };
+  }
+
+  const parsed = parseAuthRedirect(redirect, { redirectUri, state, nonce: nonce.data.nonce });
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const exchanged = await callLamiss<unknown>('/api/auth/google', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ idToken: parsed.idToken })
+  }, { anonymous: true });
+  if (!exchanged.ok) {
+    return { ok: false, reason: 'rejected', error: exchanged.error };
+  }
+  const session = readGoogleSignInResponse(exchanged.data);
+  if (!session) {
+    return { ok: false, reason: 'failed', error: 'Lamiss sent an unexpected sign-in response.' };
+  }
+
+  // Signing in as someone else ends the previous session first.
+  const previousToken = await readStoredAccessToken();
+  await storeAuthSession(session);
+  await chrome.storage.local.set({ [LAMISS_SIGNED_IN_BEFORE_KEY]: true });
+  reconnectLiveConnections(session.accessToken);
+  if (previousToken && previousToken !== session.accessToken) {
+    void revokeAccessToken(previousToken);
+  }
+
+  const signedIn = await readAuthState();
+  await broadcastAuthState(signedIn);
+  return { ok: true, state: signedIn };
+}
+
+// One sign-in at a time. A click during a silent attempt waits for it and
+// opens the Google window only if the silent attempt failed.
+let lamissSignInFlight: { interactive: boolean; result: Promise<LamissSignInResult> } | null = null;
+
+async function signInWithGoogle(interactive: boolean): Promise<LamissSignInResult> {
+  const running = lamissSignInFlight;
+  if (running) {
+    const result = await running.result;
+    if (result.ok || running.interactive || !interactive) {
+      return result;
+    }
+  }
+  if (lamissSignInFlight) {
+    return lamissSignInFlight.result;
+  }
+  const flight = {
+    interactive,
+    result: runGoogleSignIn(interactive)
+      .catch((error: unknown): LamissSignInResult => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) }))
+      .finally(() => {
+        if (lamissSignInFlight === flight) {
+          lamissSignInFlight = null;
+        }
+      })
+  };
+  lamissSignInFlight = flight;
+  return flight.result;
+}
+
+// After a browser restart (session storage is gone) or an expired session,
+// try once without showing anything; the sign-in button is the fallback.
+async function trySilentSignIn(): Promise<void> {
+  try {
+    if (!LAMISS_GOOGLE_CLIENT_ID || (await readAuthState()).status === 'signedIn') {
+      return;
+    }
+    const local = await chrome.storage.local.get(LAMISS_SIGNED_IN_BEFORE_KEY);
+    if (local[LAMISS_SIGNED_IN_BEFORE_KEY] !== true) {
+      return;
+    }
+    const session = await chrome.storage.session.get(LAMISS_SILENT_SIGN_IN_KEY);
+    const lastAttempt = Number(session[LAMISS_SILENT_SIGN_IN_KEY] ?? 0);
+    if (Date.now() - lastAttempt < LAMISS_SILENT_SIGN_IN_INTERVAL_MS) {
+      return;
+    }
+    await chrome.storage.session.set({ [LAMISS_SILENT_SIGN_IN_KEY]: Date.now() });
+    const result = await signInWithGoogle(false);
+    if (!result.ok) {
+      console.log('Lamiss POC: silent sign-in did not complete:', result.reason);
+    }
+  } catch (error) {
+    console.warn('Lamiss POC: silent sign-in failed:', error instanceof Error ? error.message : String(error));
+  }
+}
+
+// Best effort: a failed or rejected logout still ends the session locally.
+async function revokeAccessToken(accessToken: string): Promise<void> {
+  try {
+    await fetch(`${LAMISS_API_BASE_URL}/api/auth/logout`, withAuthorization({ method: 'POST' }, accessToken));
+  } catch {
+    // Offline: the session runs out on its own.
+  }
+}
+
+// Live connections belong to the signed-in user.
+function closeAllLiveConnections(detail: string): void {
+  for (const live of liveConnections) {
+    postLive(live, { type: 'status', state: 'failed', detail });
+    live.closed = true;
+    clearTimeout(live.retryTimer);
+    live.socket?.close(1000, 'Signed out');
+    live.socket = undefined;
+    try {
+      live.port.disconnect();
+    } catch {
+      // Already gone.
+    }
+  }
+  liveConnections.clear();
+  for (const requestId of listeningPorts.keys()) {
+    void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'stop-listening', requestId, discard: true }).catch(() => undefined);
+  }
+  for (const requestId of speakingPorts.keys()) {
+    void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'stop-speaking', requestId }).catch(() => undefined);
+  }
+  listeningPorts.clear();
+  speakingPorts.clear();
+  learningSessionRequests.clear();
+}
+
+async function signOutOfLamiss(): Promise<LamissAuthState> {
+  const accessToken = await readStoredAccessToken();
+  // Forget the token first, so a slow or failed logout call can't keep it.
+  await clearAuthSession();
+  await chrome.storage.local.remove(LAMISS_SIGNED_IN_BEFORE_KEY);
+  await removePendingQuestions();
+  closeAllLiveConnections(LAMISS_SIGN_IN_REQUIRED_MESSAGE);
+  const signedOut: LamissAuthState = { status: 'signedOut' };
+  await broadcastAuthState(signedOut);
+  if (accessToken) {
+    await revokeAccessToken(accessToken);
+  }
+  return signedOut;
+}
+
+// The offscreen document saw a 401. Ask the backend whether the session is
+// really gone; callLamiss marks it expired if so.
+// Only for the token the offscreen document used: a 401 for an older session
+// says nothing about the current one.
+async function verifyAuthSession(rejectedToken: unknown): Promise<void> {
+  const current = await readAccessToken();
+  if (current && typeof rejectedToken === 'string' && rejectedToken === current) {
+    await callLamiss<LamissAuthUser>('/api/auth/me', { headers: { accept: 'application/json' } }, { accessToken: current });
+  }
+}
+
+addLamissMessageListener((message: { type?: string; state?: { status?: string } }, sender, sendResponse) => {
+  const fromContentScript = classifyLamissSender(sender) === 'content';
+  switch (message?.type) {
+    case LAMISS_AUTH_STATE_MESSAGE:
+      void readAuthState().then((state) => {
+        sendResponse(fromContentScript ? { status: state.status } : state);
+        if (state.status !== 'signedIn') {
+          void trySilentSignIn();
+        }
+      });
+      return true;
+    case LAMISS_SIGN_IN_MESSAGE:
+      void signInWithGoogle(true).then((result) => {
+        sendResponse(fromContentScript && result.ok ? { ok: true, state: { status: result.state.status } } : result);
+      });
+      return true;
+    case LAMISS_SIGN_OUT_MESSAGE:
+      void signOutOfLamiss().then(sendResponse);
+      return true;
+    case LAMISS_SESSION_REJECTED_MESSAGE:
+      void verifyAuthSession((message as { rejectedToken?: unknown }).rejectedToken);
+      return false;
+    case LAMISS_AUTH_CHANGED_MESSAGE:
+      // A page saw its session rejected.
+      if (message.state?.status === 'expired') {
+        void trySilentSignIn();
+      }
+      return false;
+  }
+  return false;
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void trySilentSignIn();
 });

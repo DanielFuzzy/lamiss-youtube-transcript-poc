@@ -3,6 +3,9 @@
 // microphone permission (granted once from permission.html), and it can call
 // the backend directly. Voice activity detection decides when the user starts
 // and stops talking.
+//
+// It has no storage access, so the worker sends the Lamiss access token with
+// each listen and speak request; it is kept only for that request.
 
 const LISTEN_SAMPLE_MS = 50;
 const LISTEN_CALIBRATION_MS = 300;
@@ -23,9 +26,23 @@ type ListenSession = {
   chunks: Blob[];
   timer?: number;
   discard: boolean;
+  accessToken?: string;
 };
 
 let listenSession: ListenSession | null = null;
+
+// A 401 here: the worker checks the session and tells everyone if it's gone.
+// The rejected token goes along, so a stale one can't end a newer session.
+lamissOnSessionRejected = async (rejectedToken) => {
+  await chrome.runtime.sendMessage({ type: LAMISS_SESSION_REJECTED_MESSAGE, rejectedToken }).catch(() => undefined);
+};
+
+// Only the worker (and other extension pages, which have no tab) may command
+// this document; content scripts share the extension ID but run in a tab.
+function isFromExtensionPage(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && !sender.tab
+    && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
+}
 
 function emitListenEvent(requestId: string, event: LamissListenEvent): void {
   void chrome.runtime.sendMessage({ source: 'lamiss-offscreen', requestId, event });
@@ -40,7 +57,7 @@ function audioLevel(analyser: AnalyserNode, samples: Float32Array): number {
   return Math.sqrt(sum / samples.length);
 }
 
-async function startListening(requestId: string): Promise<void> {
+async function startListening(requestId: string, accessToken: string | undefined): Promise<void> {
   stopListening(true);
 
   let stream: MediaStream;
@@ -65,7 +82,7 @@ async function startListening(requestId: string): Promise<void> {
 
   const mimeType = pickRecordingMimeType();
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  const session: ListenSession = { requestId, stream, audioContext, recorder, chunks: [], discard: false };
+  const session: ListenSession = { requestId, stream, audioContext, recorder, chunks: [], discard: false, accessToken };
   listenSession = session;
 
   recorder.addEventListener('dataavailable', (event) => {
@@ -161,7 +178,7 @@ async function finishListening(session: ListenSession): Promise<void> {
   }
 
   emitListenEvent(session.requestId, { type: 'transcribing' });
-  const result = await transcribeSpeech(audio);
+  const result = await transcribeSpeech(audio, session.accessToken ?? '');
   if (result.ok && result.data.text?.trim()) {
     emitListenEvent(session.requestId, { type: 'transcribed', text: result.data.text.trim(), language: result.data.language ?? undefined });
   } else if (!result.ok && result.status === 422) {
@@ -187,9 +204,9 @@ function stopSpeaking(): void {
   }
 }
 
-async function speak(requestId: string, text: string, language?: string): Promise<void> {
+async function speak(requestId: string, text: string, language: string | undefined, accessToken: string | undefined): Promise<void> {
   stopSpeaking();
-  const result = await synthesizeSpeech(text, language);
+  const result = await synthesizeSpeech(text, language, accessToken ?? '');
   if (!result.ok) {
     emitSpeechEvent(requestId, { type: 'failed', error: result.error });
     return;
@@ -214,12 +231,13 @@ async function speak(requestId: string, text: string, language?: string): Promis
   }
 }
 
-chrome.runtime.onMessage.addListener((message: { target?: string; type?: string; requestId?: string; discard?: boolean; text?: string; language?: string }) => {
-  if (message?.target !== 'lamiss-offscreen') {
+chrome.runtime.onMessage.addListener((message: { target?: string; type?: string; requestId?: string; discard?: boolean; text?: string; language?: string; accessToken?: unknown }, sender) => {
+  if (message?.target !== 'lamiss-offscreen' || !isFromExtensionPage(sender)) {
     return false;
   }
+  const accessToken = typeof message.accessToken === 'string' ? message.accessToken : undefined;
   if (message.type === 'speak' && typeof message.requestId === 'string' && typeof message.text === 'string') {
-    void speak(message.requestId, message.text, message.language);
+    void speak(message.requestId, message.text, message.language, accessToken);
     return false;
   }
   if (message.type === 'stop-speaking') {
@@ -229,7 +247,7 @@ chrome.runtime.onMessage.addListener((message: { target?: string; type?: string;
     return false;
   }
   if (message.type === 'listen' && typeof message.requestId === 'string') {
-    void startListening(message.requestId);
+    void startListening(message.requestId, accessToken);
   } else if (message.type === 'stop-listening' && listenSession?.requestId === message.requestId) {
     stopListening(message.discard === true);
   }

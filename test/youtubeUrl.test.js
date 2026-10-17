@@ -1,3 +1,5 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
 const { parseYouTubeUrl } = require('../compiled/youtubeUrl.js');
 
 const cases = [
@@ -34,18 +36,13 @@ const cases = [
 ];
 
 for (const testCase of cases) {
-  const actual = parseYouTubeUrl(testCase.url);
-  if (actual.success !== testCase.expected.success) {
-    throw new Error(`${testCase.name}: expected success=${testCase.expected.success} got success=${actual.success}`);
-  }
-
-  if (testCase.expected.success) {
-    if (actual.videoId !== testCase.expected.videoId) {
-      throw new Error(`${testCase.name}: expected videoId=${testCase.expected.videoId} got videoId=${actual.videoId}`);
+  test(`parseYouTubeUrl: ${testCase.name}`, () => {
+    const actual = parseYouTubeUrl(testCase.url);
+    assert.equal(actual.success, testCase.expected.success);
+    if (testCase.expected.success) {
+      assert.equal(actual.videoId, testCase.expected.videoId);
+    } else {
+      assert.equal(actual.error, testCase.expected.error);
     }
-  } else if (actual.error !== testCase.expected.error) {
-    throw new Error(`${testCase.name}: expected error=${testCase.expected.error} got error=${actual.error}`);
-  }
+  });
 }
-
-console.log('youtubeUrl tests passed:', cases.length);

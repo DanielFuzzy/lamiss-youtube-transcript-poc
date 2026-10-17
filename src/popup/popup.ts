@@ -8,6 +8,90 @@ const askHint = document.getElementById('askHint') as HTMLParagraphElement | nul
 const answerBox = document.getElementById('answer') as HTMLDivElement | null;
 const answerText = document.getElementById('answerText') as HTMLParagraphElement | null;
 const answerMeta = document.getElementById('answerMeta') as HTMLSpanElement | null;
+const accountName = document.getElementById('accountName') as HTMLParagraphElement | null;
+const accountDetail = document.getElementById('accountDetail') as HTMLParagraphElement | null;
+const signInButton = document.getElementById('signInButton') as HTMLButtonElement | null;
+const signOutButton = document.getElementById('signOutButton') as HTMLButtonElement | null;
+
+// ---------------------------------------------------------------------------
+// Account: who is signed in. Loading transcripts and asking need a sign-in.
+// ---------------------------------------------------------------------------
+
+let popupAuthState: LamissAuthState = { status: 'signedOut' };
+let popupAuthBusy = false;
+
+function popupSignedIn(): boolean {
+  return popupAuthState.status === 'signedIn';
+}
+
+function renderAccount(detail?: { text: string; error?: boolean }): void {
+  const state = popupAuthState;
+  if (accountName) {
+    accountName.textContent = state.status === 'signedIn'
+      ? state.user.username || state.user.email
+      : state.status === 'expired' ? 'Your session ended' : 'You are not signed in';
+  }
+  if (accountDetail) {
+    accountDetail.textContent = detail?.text
+      ?? (state.status === 'signedIn' ? state.user.email : state.status === 'expired' ? LAMISS_SIGN_IN_AGAIN_MESSAGE : LAMISS_SIGN_IN_REQUIRED_MESSAGE);
+    accountDetail.classList.toggle('error', detail?.error === true);
+  }
+  if (signInButton) {
+    signInButton.hidden = state.status === 'signedIn';
+    signInButton.disabled = popupAuthBusy;
+    signInButton.textContent = popupAuthBusy ? 'Signing in…' : 'Sign in with Google';
+  }
+  if (signOutButton) {
+    signOutButton.hidden = state.status !== 'signedIn';
+    signOutButton.disabled = popupAuthBusy;
+  }
+  if (loadTranscriptButton) {
+    loadTranscriptButton.disabled = !popupSignedIn();
+  }
+  if (askState === 'idle') {
+    setAskState('idle', popupSignedIn() ? 'Tap the mic and ask about this moment' : 'Sign in to ask Lamiss');
+  }
+}
+
+async function refreshAccount(detail?: { text: string; error?: boolean }): Promise<void> {
+  popupAuthState = await readAuthState();
+  renderAccount(detail);
+}
+
+signInButton?.addEventListener('click', async () => {
+  if (popupAuthBusy) {
+    return;
+  }
+  popupAuthBusy = true;
+  renderAccount({ text: 'Continue in the Google window' });
+  // The worker runs the sign-in, so it finishes even if this popup closes.
+  const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
+    .catch((error: unknown): LamissSignInResult => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
+  popupAuthBusy = false;
+  if (!result?.ok) {
+    await refreshAccount({ text: result?.error ?? 'Sign-in failed. Please try again.', error: result?.reason !== 'cancelled' });
+    return;
+  }
+  await refreshAccount();
+});
+
+signOutButton?.addEventListener('click', async () => {
+  if (popupAuthBusy) {
+    return;
+  }
+  popupAuthBusy = true;
+  renderAccount({ text: 'Signing out…' });
+  await chrome.runtime.sendMessage({ type: LAMISS_SIGN_OUT_MESSAGE }).catch(() => undefined);
+  popupAuthBusy = false;
+  await refreshAccount();
+});
+
+chrome.runtime.onMessage.addListener((message: { type?: string } | undefined, sender) => {
+  if (message?.type === LAMISS_AUTH_CHANGED_MESSAGE && sender.id === chrome.runtime.id) {
+    void refreshAccount();
+  }
+  return false;
+});
 
 function setStatus(message: string): void {
   if (statusBox) {
@@ -30,6 +114,10 @@ function sendTranscriptToBackend(payload: TranscriptIngestPayload): Promise<Tran
 }
 
 loadTranscriptButton?.addEventListener('click', async () => {
+  if (!popupSignedIn()) {
+    setStatus(`Status: ${LAMISS_SIGN_IN_REQUIRED_MESSAGE}`);
+    return;
+  }
   setStatus('Status: Loading...');
 
   try {
@@ -97,7 +185,10 @@ loadTranscriptButton?.addEventListener('click', async () => {
 
         if (!uploadResult.ok) {
           console.error('Lamiss backend upload failed:', uploadResult.error ?? uploadResult.status);
-          setStatus(`Status: ${loadedNote} — upload failed`);
+          setStatus(`Status: ${loadedNote} — ${uploadResult.signInRequired ? uploadResult.error ?? LAMISS_SIGN_IN_REQUIRED_MESSAGE : 'upload failed'}`);
+          if (uploadResult.signInRequired) {
+            void refreshAccount();
+          }
           return;
         }
 
@@ -129,7 +220,7 @@ function setAskState(state: AskState, hint: string): void {
   askState = state;
   if (askButton) {
     askButton.dataset.state = state;
-    askButton.disabled = state === 'sending';
+    askButton.disabled = state === 'sending' || (state === 'idle' && !popupSignedIn());
     askButton.setAttribute('aria-label', state === 'recording' ? 'Stop recording and send question' : 'Start recording your question');
   }
   if (askHint) {
@@ -248,6 +339,9 @@ async function sendQuestion(audio: Blob, videoId: string, videoPositionMs: numbe
   const session = await startLearningSession(videoId);
   if (!session.ok) {
     showAnswer(session.status === 404 ? 'Click "Start using Lamiss" on the video first.' : session.error, meta, true);
+    if (session.signInRequired) {
+      void refreshAccount();
+    }
     setAskState('idle', 'Tap the mic to try again');
     return;
   }
@@ -261,6 +355,9 @@ async function sendQuestion(audio: Blob, videoId: string, videoPositionMs: numbe
 
   if (!result.ok) {
     showAnswer(`Lamiss couldn't answer: ${result.error}`, meta, true);
+    if (result.signInRequired) {
+      void refreshAccount();
+    }
     setAskState('idle', 'Tap the mic to try again');
     return;
   }
@@ -271,9 +368,13 @@ async function sendQuestion(audio: Blob, videoId: string, videoPositionMs: numbe
 }
 
 askButton?.addEventListener('click', () => {
-  if (askState === 'idle') {
+  if (askState === 'idle' && !popupSignedIn()) {
+    setAskState('idle', 'Sign in to ask Lamiss');
+  } else if (askState === 'idle') {
     void startRecording();
   } else if (askState === 'recording') {
     stopRecording();
   }
 });
+
+void refreshAccount();

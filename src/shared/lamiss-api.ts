@@ -1,6 +1,8 @@
 // Lamiss backend calls shared by the extension pages (popup and in-page chat).
 // Loaded as a plain script before each page's own script; extension pages hold
-// the backend's host permission, so they call the backend directly.
+// the backend's host permission, so they call the backend directly. The
+// content script loads it too, but never shared/lamiss-auth.js: there every
+// call goes out without a token, so a content script is always signed out.
 
 // Where the backend is: set at build time from LAMISS_API_URL (see
 // scripts/build.js), which writes them to shared/lamiss-config.js. That file
@@ -8,8 +10,43 @@
 declare const LAMISS_API_BASE_URL: string;
 declare const LAMISS_WS_BASE_URL: string;
 
-// There are no accounts yet: the backend hardcodes this local mock user too.
-const LAMISS_USER_ID = 1001;
+// --- Signing in ------------------------------------------------------------
+// The background worker owns Google sign-in (see shared/lamiss-auth.js and
+// background.ts); the other contexts ask it with these messages.
+
+const LAMISS_SIGN_IN_MESSAGE = 'lamiss:sign-in';
+const LAMISS_SIGN_OUT_MESSAGE = 'lamiss:sign-out';
+const LAMISS_AUTH_STATE_MESSAGE = 'lamiss:auth-state';
+// Sent by the worker (and extension pages) whenever the auth state changes.
+const LAMISS_AUTH_CHANGED_MESSAGE = 'lamiss:auth-changed';
+// The offscreen document saw a 401: the worker checks the session.
+const LAMISS_SESSION_REJECTED_MESSAGE = 'lamiss:session-rejected';
+
+type LamissAuthUser = { id: number; email: string; username: string };
+
+// Content scripts only ever get the status, never the user or the token.
+type LamissAuthState =
+  | { status: 'signedOut' }
+  | { status: 'signedIn'; user: LamissAuthUser; expiresAt: string }
+  | { status: 'expired' };
+
+type LamissAuthChangedMessage = { type: typeof LAMISS_AUTH_CHANGED_MESSAGE; state: LamissAuthState | { status: LamissAuthState['status'] } };
+
+type LamissSignInResult =
+  | { ok: true; state: LamissAuthState }
+  | { ok: false; error: string; reason: LamissSignInFailure };
+
+type LamissSignInFailure = 'cancelled' | 'interaction_required' | 'state_mismatch' | 'nonce_mismatch' | 'not_configured' | 'rejected' | 'failed';
+
+const LAMISS_SIGN_IN_REQUIRED_MESSAGE = 'Sign in to use Lamiss.';
+const LAMISS_SIGN_IN_AGAIN_MESSAGE = 'Please sign in again.';
+
+// Where calls get the access token, and what a rejected token triggers.
+// shared/lamiss-auth.js replaces both where it is loaded (the worker, popup
+// and chat); elsewhere calls carry no token. The rejected token is passed on:
+// a late 401 for an older session must not end a newer one.
+let lamissReadAccessToken: () => Promise<string | undefined> = async () => undefined;
+let lamissOnSessionRejected: (rejectedToken: string) => Promise<void> = async () => undefined;
 
 type LamissLearningSession = {
   learningSessionId: number;
@@ -73,9 +110,59 @@ function saveQuestionSettings(settings: LamissQuestionSettings): Promise<void> {
 
 const LAMISS_UNREACHABLE_MESSAGE = `Could not reach Lamiss at ${LAMISS_API_BASE_URL}. Check your connection and try again.`;
 
+// signInRequired: the backend answered 401, so only signing in again helps.
 type LamissCallResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status?: number; error: string; retryable: boolean };
+  | { ok: false; status?: number; error: string; retryable: boolean; signInRequired?: boolean };
+
+type LamissCallOptions = {
+  // The public sign-in endpoints: no token is sent, and a 401 is an ordinary error.
+  anonymous?: boolean;
+  // The offscreen document has no storage access; the worker passes the token.
+  accessToken?: string;
+};
+
+type LamissProblem = { detail?: string; retryable?: boolean; errorCode?: string };
+
+async function resolveAccessToken(options: LamissCallOptions): Promise<string | undefined> {
+  if (options.anonymous) {
+    return undefined;
+  }
+  if (options.accessToken !== undefined) {
+    return options.accessToken || undefined;
+  }
+  try {
+    return await lamissReadAccessToken();
+  } catch {
+    return undefined;
+  }
+}
+
+function withAuthorization(init: RequestInit, accessToken: string | undefined): RequestInit {
+  if (!accessToken) {
+    return init;
+  }
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${accessToken}`);
+  return { ...init, headers };
+}
+
+// A 401 on an authenticated call: the token is gone or expired. It is never
+// retried; the user has to sign in again.
+// rejectedToken: the token the rejected request carried, if any.
+async function lamissUnauthorized(rejectedToken: string | undefined): Promise<{ ok: false; status: number; error: string; retryable: false; signInRequired: true }> {
+  const tokenSent = Boolean(rejectedToken);
+  if (rejectedToken) {
+    await lamissOnSessionRejected(rejectedToken).catch(() => undefined);
+  }
+  return {
+    ok: false,
+    status: 401,
+    error: tokenSent ? LAMISS_SIGN_IN_AGAIN_MESSAGE : LAMISS_SIGN_IN_REQUIRED_MESSAGE,
+    retryable: false,
+    signInRequired: true
+  };
+}
 
 type LamissQuestion = {
   // Generated once per question and reused on retries, so a retry gets the
@@ -85,13 +172,18 @@ type LamissQuestion = {
   videoPositionMs: number;
 } & ({ text: string } | { audio: Blob });
 
-async function callLamiss<T>(path: string, init: RequestInit): Promise<LamissCallResult<T>> {
+async function callLamiss<T>(path: string, init: RequestInit, options: LamissCallOptions = {}): Promise<LamissCallResult<T>> {
   try {
-    const response = await fetch(`${LAMISS_API_BASE_URL}${path}`, init);
+    const accessToken = await resolveAccessToken(options);
+    const response = await fetch(`${LAMISS_API_BASE_URL}${path}`, withAuthorization(init, accessToken));
     if (!response.ok) {
+      // Only the status is logged: bodies and headers can carry credentials.
+      console.error('Lamiss POC: backend call failed:', path, response.status);
+      if (response.status === 401 && !options.anonymous) {
+        return await lamissUnauthorized(accessToken);
+      }
       // Errors are RFC 9457 problem details with a "retryable" flag.
-      const problem = await response.json().catch(() => undefined) as { detail?: string; retryable?: boolean } | undefined;
-      console.error('Lamiss POC: backend call failed:', path, response.status, problem);
+      const problem = await response.json().catch(() => undefined) as LamissProblem | undefined;
       return {
         ok: false,
         status: response.status,
@@ -142,7 +234,7 @@ function fetchSessionChat(learningSessionId: number): Promise<LamissCallResult<L
 
 const LAMISS_START_SESSION_MESSAGE = 'lamiss:start-session';
 
-// Resumes the (hardcoded, local) user's open session on the video, or starts one.
+// Resumes the signed-in user's open session on the video, or starts one.
 function startLearningSession(videoExternalId: string): Promise<LamissCallResult<LamissLearningSession>> {
   return callLamiss<LamissLearningSession>('/api/learning-sessions', {
     method: 'POST',
@@ -174,7 +266,8 @@ function askLamiss(question: LamissQuestion): Promise<LamissCallResult<LamissAns
 // Speech to text only: used for spoken answers to Lamiss's questions.
 // language is the backend's name for what it heard ("ENGLISH", "SPANISH", …),
 // or null when it couldn't tell.
-function transcribeSpeech(audio: Blob): Promise<LamissCallResult<{ text?: string; language?: string | null }>> {
+// accessToken: the offscreen document gets it from the worker with each request.
+function transcribeSpeech(audio: Blob, accessToken?: string): Promise<LamissCallResult<{ text?: string; language?: string | null }>> {
   const form = new FormData();
   const extension = audio.type === 'audio/ogg' ? 'ogg' : 'webm';
   form.append('audio', audio, `answer.${extension}`);
@@ -182,20 +275,24 @@ function transcribeSpeech(audio: Blob): Promise<LamissCallResult<{ text?: string
     method: 'POST',
     headers: { accept: 'application/json' },
     body: form
-  });
+  }, { accessToken });
 }
 
 // Lamiss's own voice (a kind teacher), as MP3 audio. language (ISO 639-1)
 // picks the voice when the backend uses Kokoro, whose voices speak one language each.
-async function synthesizeSpeech(text: string, language?: string): Promise<LamissCallResult<Blob>> {
+async function synthesizeSpeech(text: string, language?: string, accessToken?: string): Promise<LamissCallResult<Blob>> {
   try {
-    const response = await fetch(`${LAMISS_API_BASE_URL}/api/speech/synthesis`, {
+    const token = await resolveAccessToken({ accessToken });
+    const response = await fetch(`${LAMISS_API_BASE_URL}/api/speech/synthesis`, withAuthorization({
       method: 'POST',
       headers: { 'Content-Type': 'application/json', accept: 'audio/mpeg' },
       body: JSON.stringify(language ? { text, language } : { text })
-    });
+    }, token));
+    if (response.status === 401) {
+      return await lamissUnauthorized(token);
+    }
     if (!response.ok) {
-      const problem = await response.json().catch(() => undefined) as { detail?: string; retryable?: boolean } | undefined;
+      const problem = await response.json().catch(() => undefined) as LamissProblem | undefined;
       return { ok: false, status: response.status, error: problem?.detail ?? `HTTP ${response.status}`, retryable: problem?.retryable ?? response.status >= 500 };
     }
     return { ok: true, data: await response.blob() };

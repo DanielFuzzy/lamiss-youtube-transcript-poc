@@ -73,6 +73,76 @@
       color: var(--muted);
     }
 
+    .brand-text {
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* Account */
+    .account {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 6px 14px 0;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+
+    .account-user {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .account-name {
+      margin: 0;
+      overflow: hidden;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .account-detail {
+      margin: 2px 0 0;
+      overflow: hidden;
+      font-size: 11.5px;
+      color: var(--muted);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .account-detail.error {
+      color: var(--error);
+      white-space: normal;
+    }
+
+    .btn-small {
+      flex: 0 0 auto;
+      height: 30px;
+      font-size: 12px;
+    }
+
+    .btn-quiet {
+      color: var(--accent-soft);
+      background: transparent;
+      border: 1px solid var(--border);
+    }
+
+    .btn-quiet:hover {
+      background: rgba(139, 92, 246, 0.18);
+    }
+
+    .btn:disabled,
+    .mic:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .btn:disabled:hover {
+      background: var(--accent-strong);
+    }
+
     main {
       display: flex;
       flex-direction: column;
@@ -300,11 +370,20 @@
 <body>
   <header class="brand">
     <div class="logo" aria-hidden="true">L</div>
-    <div>
+    <div class="brand-text">
       <h1>Lamiss</h1>
       <p class="tagline">Your YouTube learning companion</p>
     </div>
   </header>
+
+  <section id="account" class="account" aria-live="polite">
+    <div class="account-user">
+      <p id="accountName" class="account-name">Checking your sign-in…</p>
+      <p id="accountDetail" class="account-detail"></p>
+    </div>
+    <button id="signInButton" class="btn btn-small" type="button" hidden>Sign in with Google</button>
+    <button id="signOutButton" class="btn btn-small btn-quiet" type="button" hidden>Sign out</button>
+  </section>
 
   <main>
     <section class="card ask">
@@ -342,6 +421,7 @@
 
   <script src="../shared/lamiss-config.js"></script>
   <script src="../shared/lamiss-api.js"></script>
+  <script src="../shared/lamiss-auth.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
