@@ -66,6 +66,67 @@
   box-shadow: 0 2px 10px rgba(190, 18, 60, 0.35);
 }
 
+/* After setup the button shrinks to its logo with a status dot. */
+.lamiss-start-button[data-badge] {
+  padding: 0 6px;
+}
+
+.lamiss-start-button[data-badge] .lamiss-start-button__label {
+  display: none;
+}
+
+.lamiss-start-button__logo {
+  position: relative;
+}
+
+.lamiss-start-button__dot {
+  display: none;
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid #5b21b6;
+  border-radius: 50%;
+}
+
+.lamiss-start-button[data-badge] .lamiss-start-button__dot {
+  display: block;
+}
+
+.lamiss-start-button[data-badge="monitoring"] .lamiss-start-button__dot {
+  background: #22c55e;
+}
+
+.lamiss-start-button[data-badge="connecting"] .lamiss-start-button__dot {
+  background: #9ca3af;
+  animation: lamiss-badge-blink 1.6s ease-in-out infinite;
+}
+
+.lamiss-start-button[data-badge="question"] .lamiss-start-button__dot {
+  background: #e879f9;
+  animation: lamiss-badge-ring 1s ease-in-out infinite;
+}
+
+.lamiss-start-button[data-badge="error"] .lamiss-start-button__dot {
+  background: #f43f5e;
+}
+
+@keyframes lamiss-badge-blink {
+  50% { opacity: 0.35; }
+}
+
+@keyframes lamiss-badge-ring {
+  50% { box-shadow: 0 0 0 4px rgba(232, 121, 249, 0.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lamiss-start-button__dot {
+    animation: none !important;
+  }
+}
+
 @keyframes lamiss-start-button-pulse {
   50% {
     transform: scale(0.85);
@@ -320,6 +381,38 @@
   /* Solid dark purple so the white text reads on light and dark YouTube. */
   background: #3b1a6e;
   transition: background 0.15s ease;
+  /* Holds the progress bar along the bottom edge. */
+  position: relative;
+  overflow: hidden;
+}
+
+/* How far the video has come towards the next question. */
+.lamiss-question-timer__progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.lamiss-question-timer__progress[hidden] {
+  display: none;
+}
+
+.lamiss-question-timer__fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6 0%, #e879f9 100%);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.25s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lamiss-question-timer__fill {
+    transition: none;
+  }
 }
 
 .lamiss-question-timer:hover {

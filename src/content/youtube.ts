@@ -410,6 +410,11 @@ function createLamissButton(): HTMLButtonElement {
   const logo = document.createElement('span');
   logo.className = 'lamiss-start-button__logo';
   logo.textContent = 'L';
+  // Status dot, shown once the button shrinks to a badge (see lamissBadgeState).
+  const dot = document.createElement('span');
+  dot.className = 'lamiss-start-button__dot';
+  dot.setAttribute('aria-hidden', 'true');
+  logo.append(dot);
 
   const label = document.createElement('span');
   label.className = 'lamiss-start-button__label';
@@ -421,6 +426,38 @@ function createLamissButton(): HTMLButtonElement {
   return button;
 }
 
+// Once Lamiss is connected and has answered the first position report, the
+// "Lamiss is ready" button shrinks to its logo with a status dot for the rest
+// of the session. The dot only reflects the connection and what the user can
+// see happening, never Lamiss's background work.
+type LamissBadgeState = 'monitoring' | 'connecting' | 'question' | 'error';
+
+const LAMISS_BADGE_ERROR_FLASH_MS = 5000;
+
+const LAMISS_BADGE_DETAILS: Record<LamissBadgeState, string> = {
+  monitoring: 'Lamiss is connected and following the video',
+  connecting: 'Reconnecting to Lamiss…',
+  question: 'Lamiss is asking you a question',
+  error: 'Lamiss had a problem'
+};
+
+// Set once this video's live session first hears back from Lamiss.
+let lamissMonitoringStarted = false;
+let lamissLastErrorAt = 0;
+
+function lamissBadgeState(): LamissBadgeState | undefined {
+  if (lamissButtonState !== 'ready' || !lamissMonitoringStarted || lamissLiveVideoId !== lamissButtonVideoId) {
+    return undefined;
+  }
+  if (lamissLiveState === 'failed' || Date.now() - lamissLastErrorAt < LAMISS_BADGE_ERROR_FLASH_MS) {
+    return 'error';
+  }
+  if (lamissLiveState !== 'connected') {
+    return 'connecting';
+  }
+  return lamissQuestion ? 'question' : 'monitoring';
+}
+
 // Only touches the DOM when something changed: the MutationObserver below
 // watches the whole page, so an unconditional write would retrigger it forever.
 function renderLamissButton(button: HTMLButtonElement): void {
@@ -428,8 +465,26 @@ function renderLamissButton(button: HTMLButtonElement): void {
     button.dataset.state = lamissButtonState;
     button.disabled = lamissButtonState === 'loading' || lamissButtonState === 'signing-in';
   }
-  if (button.title !== lamissButtonDetail) {
-    button.title = lamissButtonDetail;
+  const badge = lamissBadgeState();
+  if ((button.dataset.badge ?? '') !== (badge ?? '')) {
+    if (badge) {
+      button.dataset.badge = badge;
+    } else {
+      delete button.dataset.badge;
+    }
+  }
+  // As a badge the label is hidden, so the name moves to aria-label.
+  const detail = badge ? `${LAMISS_BADGE_DETAILS[badge]}. Click to show or hide the chat` : lamissButtonDetail;
+  if (button.title !== detail) {
+    button.title = detail;
+  }
+  const accessibleName = badge ? `Lamiss: ${LAMISS_BADGE_DETAILS[badge]}` : null;
+  if (button.getAttribute('aria-label') !== accessibleName) {
+    if (accessibleName) {
+      button.setAttribute('aria-label', accessibleName);
+    } else {
+      button.removeAttribute('aria-label');
+    }
   }
   const label = button.querySelector('.lamiss-start-button__label');
   const text = LAMISS_BUTTON_LABELS[lamissButtonState];
@@ -789,6 +844,8 @@ function stopLamissLive(): void {
   hideLamissQuestion();
   stopLamissTimer();
   lamissLiveVideoId = undefined;
+  lamissMonitoringStarted = false;
+  lamissLastErrorAt = 0;
   window.clearInterval(lamissLiveKeepalive);
   const port = lamissLivePort;
   lamissLivePort = null;
@@ -895,7 +952,13 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
       onLamissError(server.message);
       break;
     case 'NEXT_QUESTION':
-      lamissNextQuestion = { atVideoMs: server.atVideoMs, waitingForAnswer: server.waitingForAnswer };
+      // Each one starts a new range for the progress bar, from where the video is now.
+      lamissNextQuestion = {
+        atVideoMs: server.atVideoMs,
+        waitingForAnswer: server.waitingForAnswer,
+        fromMs: (getLamissVideo()?.currentTime ?? 0) * 1000
+      };
+      lamissMonitoringStarted = true;
       renderLamissTimer();
       break;
   }
@@ -1444,6 +1507,7 @@ function resumeLamissVideo(): void {
 // being checked, the error belongs to it: let the user send it again (the
 // backend keys answers on the question, so a resend can't double-count).
 function onLamissError(message: string): void {
+  lamissLastErrorAt = Date.now();
   if (lamissQuestion?.phase === 'sending') {
     lamissQuestion.phase = 'answering';
     lamissQuestion.queued = false;
@@ -1489,7 +1553,9 @@ const LAMISS_DIFFICULTY_CHOICES: { value: LamissQuestionDifficulty; label: strin
 ];
 
 // Undefined until the backend has said; reset whenever the connection drops.
-let lamissNextQuestion: { atVideoMs: number | null; waitingForAnswer: boolean } | undefined;
+// fromMs is where the video was when it said so: the progress bar fills from
+// there to atVideoMs.
+let lamissNextQuestion: { atVideoMs: number | null; waitingForAnswer: boolean; fromMs: number } | undefined;
 let lamissTimerTick: number | undefined;
 let lamissQuestionSettings: LamissQuestionSettings = LAMISS_DEFAULT_QUESTION_SETTINGS;
 
@@ -1520,7 +1586,14 @@ function createLamissTimer(): HTMLButtonElement {
   icon.setAttribute('aria-hidden', 'true');
   const label = document.createElement('span');
   label.className = 'lamiss-question-timer__label';
-  timer.append(icon, label);
+  const progress = document.createElement('span');
+  progress.className = 'lamiss-question-timer__progress';
+  progress.setAttribute('aria-hidden', 'true');
+  progress.hidden = true;
+  const fill = document.createElement('span');
+  fill.className = 'lamiss-question-timer__fill';
+  progress.append(fill);
+  timer.append(icon, label, progress);
 
   timer.addEventListener('click', toggleLamissSettingsPopover);
   return timer;
@@ -1562,12 +1635,45 @@ function lamissTimerText(): { text: string; state: string } {
   return { text: `Next question in ${countdown}`, state: remainingMs <= 10_000 ? 'soon' : 'running' };
 }
 
+// How far the video has come towards the next question, 0 to 1; null when
+// no question is scheduled ahead, so the bar hides instead of freezing.
+function lamissTimerProgress(): number | null {
+  const next = lamissNextQuestion;
+  const video = getLamissVideo();
+  if (lamissLiveState !== 'connected' || lamissQuestion || !next || next.waitingForAnswer || next.atVideoMs === null || !video) {
+    return null;
+  }
+  const span = next.atVideoMs - next.fromMs;
+  if (span <= 0) {
+    return 1;
+  }
+  return Math.min(1, Math.max(0, (video.currentTime * 1000 - next.fromMs) / span));
+}
+
 // Runs every tick: only touches the DOM when the text changes, since the
-// page-wide MutationObserver reacts to every write.
+// page-wide MutationObserver reacts to every write. (It watches the page's
+// children, not attributes, so the progress bar's style updates don't count.)
 function renderLamissTimer(): void {
+  const button = document.getElementById(LAMISS_PAGE_BUTTON_ID) as HTMLButtonElement | null;
+  if (button) {
+    // The badge follows the live state; this tick also ends an error flash.
+    renderLamissButton(button);
+  }
   const timer = document.getElementById(LAMISS_TIMER_ID);
   if (!timer) {
     return;
+  }
+  const progress = timer.querySelector<HTMLElement>('.lamiss-question-timer__progress');
+  const fill = timer.querySelector<HTMLElement>('.lamiss-question-timer__fill');
+  if (progress && fill) {
+    const fraction = lamissTimerProgress();
+    if (progress.hidden !== (fraction === null)) {
+      progress.hidden = fraction === null;
+    }
+    const transform = `scaleX(${fraction === null ? 0 : fraction.toFixed(3)})`;
+    if (fill.style.transform !== transform) {
+      fill.style.transform = transform;
+    }
   }
   const { text, state } = lamissTimerText();
   const label = timer.querySelector('.lamiss-question-timer__label');

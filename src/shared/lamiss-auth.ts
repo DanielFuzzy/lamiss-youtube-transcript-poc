@@ -3,9 +3,12 @@
 // background worker (importScripts) and the popup and chat pages (<script>).
 // Content scripts never load it.
 //
-// The access token lives only in chrome.storage.session: Chrome clears it when
-// the browser closes, and its TRUSTED_CONTEXTS access level keeps it away from
-// content scripts. It is never written to chrome.storage.local and never logged.
+// The sign-in is permanent until the user signs out. The access token is kept
+// in chrome.storage.session, whose TRUSTED_CONTEXTS access level keeps it away
+// from content scripts, and a durable copy in the extension's own IndexedDB,
+// which content scripts can't open either. Chrome empties session storage when
+// the browser quits or the extension is reloaded; the copy brings the sign-in
+// back. The token is never written to chrome.storage.local and never logged.
 
 declare const LAMISS_GOOGLE_CLIENT_ID: string;
 
@@ -178,14 +181,73 @@ function readGoogleSignInResponse(data: unknown): LamissAuthSession | undefined 
 
 // --- Storage --------------------------------------------------------------------
 
-async function readStoredAuth(): Promise<unknown> {
-  try {
-    const stored = await chrome.storage.session.get(LAMISS_AUTH_SESSION_KEY);
-    return stored[LAMISS_AUTH_SESSION_KEY];
-  } catch {
-    // No session storage here: signed out.
+const LAMISS_AUTH_DATABASE = 'lamiss-auth';
+const LAMISS_AUTH_DATABASE_STORE = 'auth';
+
+// The extension origin's IndexedDB: the worker, popup and chat share it.
+// Undefined where there is none (tests) or it can't open: session storage alone.
+function openAuthDatabase(): Promise<IDBDatabase | undefined> {
+  if (typeof indexedDB === 'undefined') {
+    return Promise.resolve(undefined);
+  }
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(LAMISS_AUTH_DATABASE, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(LAMISS_AUTH_DATABASE_STORE);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(undefined);
+      request.onblocked = () => resolve(undefined);
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+async function withAuthDatabase(mode: IDBTransactionMode, use: (store: IDBObjectStore) => IDBRequest): Promise<unknown> {
+  const database = await openAuthDatabase();
+  if (!database) {
     return undefined;
   }
+  try {
+    return await new Promise<unknown>((resolve) => {
+      const transaction = database.transaction(LAMISS_AUTH_DATABASE_STORE, mode);
+      const request = use(transaction.objectStore(LAMISS_AUTH_DATABASE_STORE));
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onerror = () => resolve(undefined);
+      transaction.onabort = () => resolve(undefined);
+    });
+  } catch {
+    return undefined;
+  } finally {
+    database.close();
+  }
+}
+
+function writeDurableAuth(value: LamissStoredAuth | undefined): Promise<unknown> {
+  return withAuthDatabase('readwrite', store => value === undefined
+    ? store.delete(LAMISS_AUTH_SESSION_KEY)
+    : store.put(value, LAMISS_AUTH_SESSION_KEY));
+}
+
+async function readStoredAuth(): Promise<unknown> {
+  if (!chrome.storage.session) {
+    // No session storage here (a content script): signed out.
+    return undefined;
+  }
+  try {
+    const stored = await chrome.storage.session.get(LAMISS_AUTH_SESSION_KEY);
+    if (stored[LAMISS_AUTH_SESSION_KEY] !== undefined) {
+      return stored[LAMISS_AUTH_SESSION_KEY];
+    }
+  } catch {
+    return undefined;
+  }
+  // Emptied by a browser restart or an extension reload: restore the copy.
+  const durable = await withAuthDatabase('readonly', store => store.get(LAMISS_AUTH_SESSION_KEY));
+  if (durable !== undefined) {
+    await chrome.storage.session.set({ [LAMISS_AUTH_SESSION_KEY]: durable }).catch(() => undefined);
+  }
+  return durable;
 }
 
 async function readAuthState(): Promise<LamissAuthState> {
@@ -204,17 +266,22 @@ async function readStoredAccessToken(): Promise<string | undefined> {
   return isAuthSession(stored) ? stored.accessToken : undefined;
 }
 
-function storeAuthSession(session: LamissAuthSession): Promise<void> {
-  return chrome.storage.session.set({ [LAMISS_AUTH_SESSION_KEY]: session });
+// The durable copy is written first and removed first: a read that finds
+// session storage empty never restores a session that is being replaced.
+async function storeAuthSession(session: LamissAuthSession): Promise<void> {
+  await writeDurableAuth(session);
+  await chrome.storage.session.set({ [LAMISS_AUTH_SESSION_KEY]: session });
 }
 
-function markAuthExpired(): Promise<void> {
+async function markAuthExpired(): Promise<void> {
   const marker: LamissStoredAuth = { expired: true };
-  return chrome.storage.session.set({ [LAMISS_AUTH_SESSION_KEY]: marker });
+  await writeDurableAuth(marker);
+  await chrome.storage.session.set({ [LAMISS_AUTH_SESSION_KEY]: marker });
 }
 
-function clearAuthSession(): Promise<void> {
-  return chrome.storage.session.remove(LAMISS_AUTH_SESSION_KEY);
+async function clearAuthSession(): Promise<void> {
+  await writeDurableAuth(undefined);
+  await chrome.storage.session.remove(LAMISS_AUTH_SESSION_KEY);
 }
 
 // Lamiss's unanswered questions belong to the signed-in user.

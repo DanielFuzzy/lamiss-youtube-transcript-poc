@@ -19,6 +19,10 @@ LAMISS_GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com \
 npm run build
 ```
 
+The variables can also go in a `.env` file next to `package.json` (git-ignored),
+one `KEY=value` per line; then a plain `npm run build` or `npm test` uses them.
+Variables set in the environment take precedence.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `LAMISS_API_URL` | `http://localhost:8080` | Backend origin (scheme, host, optional port). Written to `compiled/shared/lamiss-config.js` and added to the manifest's host permissions. The WebSocket URL is derived from it (`http` → `ws`, `https` → `wss`). |

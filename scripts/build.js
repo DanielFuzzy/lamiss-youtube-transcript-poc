@@ -15,6 +15,14 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
+
+// Optional git-ignored .env next to package.json (KEY=value lines), so a plain
+// `npm run build` or `npm test` keeps the same settings. Variables already set
+// in the environment win.
+const envFile = path.join(root, '.env');
+if (fs.existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+}
 const outDir = path.resolve(root, process.argv[2] || 'compiled');
 const DEFAULT_API_URL = 'http://localhost:8080';
 

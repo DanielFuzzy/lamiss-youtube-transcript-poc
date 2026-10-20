@@ -1146,11 +1146,11 @@ addLamissMessageListener((message: { source?: string; requestId?: string; event?
 // ---------------------------------------------------------------------------
 // Google sign-in (TDR-0001). The worker owns it: it asks the backend for a
 // nonce, runs Google's sign-in in chrome.identity's window, checks the state
-// it sent, and exchanges Google's ID token for a Lamiss access token, which
-// stays in chrome.storage.session. Content scripts never receive the token.
+// it sent, and exchanges Google's ID token for a Lamiss access token, kept
+// until sign-out (see shared/lamiss-auth.ts). Content scripts never receive it.
 // ---------------------------------------------------------------------------
 
-// Silent sign-ins are rare: on browser start, and when a session runs out.
+// Silent sign-ins are rare: when no sign-in is stored, or it was rejected.
 const LAMISS_SILENT_SIGN_IN_KEY = 'lamissSilentSignInAt';
 const LAMISS_SILENT_SIGN_IN_INTERVAL_MS = 5 * 60_000;
 const LAMISS_SILENT_SIGN_IN_TIMEOUT_MS = 10_000;
@@ -1270,8 +1270,8 @@ async function signInWithGoogle(interactive: boolean): Promise<LamissSignInResul
   return flight.result;
 }
 
-// After a browser restart (session storage is gone) or an expired session,
-// try once without showing anything; the sign-in button is the fallback.
+// When no sign-in is stored or the backend rejected it, try once without
+// showing anything; the sign-in button is the fallback.
 async function trySilentSignIn(): Promise<void> {
   try {
     if (!LAMISS_GOOGLE_CLIENT_ID || (await readAuthState()).status === 'signedIn') {
