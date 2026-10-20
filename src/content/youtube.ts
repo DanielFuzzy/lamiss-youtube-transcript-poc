@@ -967,7 +967,7 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
       showLamissQuestion(server.eventId, server.question);
       break;
     case 'FEEDBACK':
-      showLamissFeedback(server.correct, server.feedback);
+      showLamissFeedback(server.correct, server.feedback, server.language);
       break;
     case 'RESUME_VIDEO':
       onLamissResume();
@@ -1049,12 +1049,13 @@ document.addEventListener('play', (event) => {
 // Lamiss speaks with her own voice, a kind teacher synthesized by the backend
 // and played by the extension. If that fails (backend down, no audio), the
 // browser's built-in voice reads the text instead. Resolves when she's done.
-let lamissSpeech: { requestId: string; text: string; resolve: () => void } | null = null;
+let lamissSpeech: { requestId: string; text: string; language?: string; resolve: () => void } | null = null;
 
-function speakLamiss(text: string): Promise<void> {
+// language picks the voice (ISO 639-1); by default the video's language.
+function speakLamiss(text: string, language: string | undefined = lamissLiveLanguage): Promise<void> {
   stopLamissSpeech();
   if (!lamissLivePort) {
-    return speakWithBrowserVoice(text);
+    return speakWithBrowserVoice(text, language);
   }
   return new Promise((resolve) => {
     const requestId = crypto.randomUUID();
@@ -1071,8 +1072,8 @@ function speakLamiss(text: string): Promise<void> {
     };
     // Generating the audio takes a moment; this covers that plus playback.
     const limit = window.setTimeout(finish, 15_000 + text.length * 150);
-    lamissSpeech = { requestId, text, resolve: finish };
-    postLamissLive({ type: 'speak', requestId, text, ...(lamissLiveLanguage ? { language: lamissLiveLanguage } : {}) });
+    lamissSpeech = { requestId, text, language, resolve: finish };
+    postLamissLive({ type: 'speak', requestId, text, ...(language ? { language } : {}) });
   });
 }
 
@@ -1086,7 +1087,7 @@ function onLamissSpeechEvent(requestId: string, event: LamissSpeechEvent): void 
   } else if (event.type === 'failed') {
     // Still the current speech, so stopLamissSpeech can cut the fallback too.
     console.warn('Lamiss POC: Lamiss\'s voice failed, using the browser voice:', event.error);
-    void speakWithBrowserVoice(speech.text).then(speech.resolve);
+    void speakWithBrowserVoice(speech.text, speech.language).then(speech.resolve);
   }
 }
 
@@ -1103,7 +1104,7 @@ function stopLamissSpeech(): void {
 }
 
 // The browser's built-in voice: robotic, but always available.
-function speakWithBrowserVoice(text: string): Promise<void> {
+function speakWithBrowserVoice(text: string, language: string | undefined = lamissLiveLanguage): Promise<void> {
   return new Promise((resolve) => {
     if (!text || !('speechSynthesis' in window)) {
       resolve();
@@ -1118,9 +1119,9 @@ function speakWithBrowserVoice(text: string): Promise<void> {
       }
     };
     const utterance = new SpeechSynthesisUtterance(text);
-    if (lamissLiveLanguage) {
-      utterance.lang = lamissLiveLanguage;
-      const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith(lamissLiveLanguage!.toLowerCase()));
+    if (language) {
+      utterance.lang = language;
+      const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith(language.toLowerCase()));
       if (voice) {
         utterance.voice = voice;
       }
@@ -1481,7 +1482,9 @@ function submitLamissAnswer(answer: string, spokenLanguage?: string): void {
   postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer, language: spokenLanguage });
 }
 
-function showLamissFeedback(correct: boolean, feedback: string): void {
+// language: what the backend wrote the feedback in (the learner's explanation
+// language when set), so Lamiss reads it with a voice of that language.
+function showLamissFeedback(correct: boolean, feedback: string, language?: string | null): void {
   const parts = lamissQuestionParts();
   const question = lamissQuestion;
   if (!parts || !question) {
@@ -1496,7 +1499,7 @@ function showLamissFeedback(correct: boolean, feedback: string): void {
   parts.submit.focus();
 
   question.speakingFeedback = true;
-  void speakLamiss(feedback).then(() => {
+  void speakLamiss(feedback, lamissSpeechLanguage(language, lamissLiveLanguage)).then(() => {
     question.speakingFeedback = false;
     if (lamissQuestion === question && question.resumeRequested) {
       window.clearTimeout(lamissResumeTimer);

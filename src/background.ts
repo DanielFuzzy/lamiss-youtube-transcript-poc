@@ -671,7 +671,8 @@ const WEBSOCKET_UNAUTHENTICATED = 4401;
 type LamissServerMessage =
   | { type: 'PAUSE_VIDEO' }
   | { type: 'ASK_QUESTION'; eventId: string; question: string }
-  | { type: 'FEEDBACK'; correct: boolean; feedback: string }
+  // language: the ISO 639-1 code the feedback is written in (TDR-0002), or null.
+  | { type: 'FEEDBACK'; correct: boolean; feedback: string; language?: string | null }
   | { type: 'RESUME_VIDEO' }
   | { type: 'ERROR'; message: string }
   // When the next question will come if the video keeps playing; atVideoMs

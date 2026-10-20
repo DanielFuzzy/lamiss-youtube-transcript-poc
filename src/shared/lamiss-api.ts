@@ -360,6 +360,12 @@ async function synthesizeSpeech(text: string, language?: string, accessToken?: s
   }
 }
 
+// The language to read a text in: the one the backend reported for it (an
+// ISO 639-1 code, e.g. FEEDBACK's language), else the fallback (the video's).
+function lamissSpeechLanguage(reported: unknown, fallback: string | undefined): string | undefined {
+  return typeof reported === 'string' && /^[a-z]{2}$/.test(reported) ? reported : fallback;
+}
+
 async function readVideoPositionMs(tabId: number): Promise<number> {
   try {
     const [result] = await chrome.scripting.executeScript({

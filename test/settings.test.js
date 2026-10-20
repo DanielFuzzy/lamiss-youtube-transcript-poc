@@ -125,6 +125,18 @@ test('voices are filtered to the learning language, or all of them when none is 
   assert.equal(env.run('voicesForLanguage(voices, null)').length, 3);
 });
 
+// FEEDBACK's language (the explanation language) picks the voice that reads it.
+test('speech language: the reported language, else the video\'s', () => {
+  const env = pageEnv();
+  assert.equal(env.run("lamissSpeechLanguage('es', 'en')"), 'es');
+  assert.equal(env.run("lamissSpeechLanguage(null, 'en')"), 'en');
+  assert.equal(env.run("lamissSpeechLanguage(undefined, 'en')"), 'en');
+  assert.equal(env.run("lamissSpeechLanguage(undefined, undefined)"), undefined);
+  // Not an ISO 639-1 code: ignored.
+  assert.equal(env.run("lamissSpeechLanguage('SPANISH', 'en')"), 'en');
+  assert.equal(env.run("lamissSpeechLanguage({}, 'en')"), 'en');
+});
+
 test('question frequency maps to the stored gap and highlights the nearest choice', () => {
   const env = pageEnv();
   assert.deepEqual(plain(env.run('LAMISS_QUESTION_FREQUENCIES')), [
