@@ -92,6 +92,50 @@ The backend must also allow the extension's origin for CORS:
   any unanswered questions and closes live connections. The local sign-out
   still happens if the backend can't be reached.
 
+## The popup
+
+The toolbar popup (TDR-0002,
+[docs/TDR-0002-Settings-Popup.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0002-Settings-Popup.md))
+has a home view and one view per settings category, each with a back arrow:
+
+- **Home**: **Start Learning** sends `lamiss:start-learning` to the active
+  YouTube tab, which runs the same flow as the in-page Lamiss button (or opens
+  the chat if Lamiss is already on). The status line comes from the sign-in,
+  `GET /api/auth/me` (is the backend reachable), the active tab, and the tab's
+  answer to `lamiss:page-status`. The content script only accepts both
+  messages from this extension's own pages. Signed out, the popup shows
+  **Sign in with Google** and Tutor Behavior / Profile & Account are disabled.
+- **Double Captions**: "Coming soon"; there is nothing to switch on yet.
+- **Audio & Voice**: microphone and speaker (with a level-meter microphone test
+  and a test tone), tutor voice (`GET /api/speech/voices`, filtered to the
+  learning language), **Preview voice**, speaking speed, and volume.
+- **Tutor Behavior**: kindness, question frequency, response length,
+  encouragement, explanation language.
+- **Profile & Account**: name, email and picture from `/api/auth/me`, native and
+  learning language, level, and **Log Out**.
+
+Each view is its own script under `src/popup/` (`home-view.ts`,
+`audio-view.ts`, `tutor-view.ts`, `profile-view.ts`) on top of
+`popup-shared.ts`; `popup.ts` wires the navigation.
+
+Where the settings live:
+
+| Where | What |
+|---|---|
+| `chrome.storage.local` `lamissDeviceSettings` | `{ micDeviceId?, speakerDeviceId?, volume }` (volume 0–1). Device IDs belong to this machine and browser profile and never leave the extension. The chat panel records with `micDeviceId`; the worker adds `micDeviceId` to the offscreen document's `listen` and `speakerDeviceId` + `volume` to its `speak` messages. A device that is gone falls back to the default one. |
+| `chrome.storage.local` `lamissQuestionSettings` | Question frequency (`minSecondsBetweenQuestions`: Less 300, Normal 120, More 60) and difficulty, also set from the chat panel. |
+| Backend, `GET`/`PUT /api/me/preferences` | Languages, level, kindness, response length, encouragement, explanation language, voice, speed. |
+
+To see every view in a browser with a stubbed backend and fake media devices:
+
+```sh
+npm run build && node scripts/popup-e2e.js [screenshotDir]
+```
+
+It needs a Chromium-based browser that still accepts `--load-extension`
+(set `LAMISS_E2E_BROWSER`; branded Google Chrome no longer does) and is not
+part of `npm test`.
+
 ## Tests
 
 ```sh
