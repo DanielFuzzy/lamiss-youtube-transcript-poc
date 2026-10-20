@@ -346,7 +346,9 @@ function renderAudioVoices(list: LamissVoiceList, preferences: LamissPreferences
     audioVoiceSelect.hidden = true;
     audioVoiceReadOnly.hidden = false;
     audioVoiceReadOnly.textContent = only ? `${only.label} (${list.provider})` : `The ${list.provider} voice`;
-    audioVoiceHint.textContent = 'Your Lamiss server uses this one voice for every language.';
+    // Nor can its speed be changed (TDR-0002): no slider that does nothing.
+    audioSpeedInput.disabled = true;
+    audioVoiceHint.textContent = 'Your Lamiss server uses this one voice for every language, at its own speed.';
     return;
   }
 

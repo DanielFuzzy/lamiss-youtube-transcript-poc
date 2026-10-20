@@ -60,7 +60,7 @@ let preferences = {
   tutor: { kindness: 'BALANCED', responseLength: 'NORMAL', encouragement: true, explanationLanguage: null },
   voice: { voiceId: null, speed: 0.95 }
 };
-const voices = {
+const kokoroVoices = {
   provider: 'kokoro',
   selectable: true,
   defaultSpeed: 0.95,
@@ -71,6 +71,8 @@ const voices = {
     { id: 'ef_dora', label: 'Dora', language: 'es', default: true }
   ]
 };
+const openaiVoices = { provider: 'openai', selectable: false, defaultSpeed: 1.0, voices: [{ id: 'coral', label: 'Coral', language: null, default: true }] };
+let voices = kokoroVoices;
 const backendCalls = [];
 
 // A short silent WAV stands in for synthesized speech.
@@ -265,6 +267,17 @@ async function main() {
     await shotBottom('06-audio-saved', 'audio');
     await back('audio');
 
+    // The OpenAI provider: one voice, shown read-only, and no speed slider that does nothing.
+    voices = openaiVoices;
+    await popup.locator('.category[data-open="audio"]').click();
+    await popup.waitForSelector('#voiceReadOnly:not([hidden])', { timeout: 10000 });
+    check(await popup.locator('#voiceSelect').isHidden(), 'audio (openai): no voice choice');
+    check(await popup.locator('#speedInput').isDisabled(), 'audio (openai): the speed slider is disabled');
+    check(await popup.locator('#voicePreviewButton').isEnabled(), 'audio (openai): preview still works');
+    await shot('06b-audio-openai');
+    voices = kokoroVoices;
+    await back('audio');
+
     // Tutor Behavior.
     await popup.locator('.category[data-open="tutor"]').click();
     await popup.waitForSelector('#tutorForm:not([hidden])');
@@ -328,6 +341,16 @@ async function main() {
     await shot('12-backend-down');
 
     check(backendCalls.filter(call => call.call !== 'POST /api/auth/logout').every(call => call.authorized), 'every backend call carried the token');
+    // TDR-0002: a PUT always carries the required fields, codes lowercase and enums uppercase.
+    const puts = backendCalls.filter(call => call.call === 'PUT /api/me/preferences').map(call => JSON.parse(call.body));
+    const code = value => value === null || /^[a-z]{2}$/.test(value);
+    check(puts.length > 0 && puts.every(body => body.tutor && body.voice
+      && ['GENTLE', 'BALANCED', 'STRICT'].includes(body.tutor.kindness)
+      && ['SHORT', 'NORMAL', 'DETAILED'].includes(body.tutor.responseLength)
+      && typeof body.tutor.encouragement === 'boolean'
+      && typeof body.voice.speed === 'number' && body.voice.speed >= 0.5 && body.voice.speed <= 2
+      && code(body.nativeLanguage) && code(body.learningLanguage) && code(body.tutor.explanationLanguage)
+      && (body.proficiencyLevel === null || /^[ABC][12]$/.test(body.proficiencyLevel))), `every PUT is a complete TDR-0002 body (${puts.length})`);
   } finally {
     await context.close();
     fs.rmSync(userDataDir, { recursive: true, force: true });
