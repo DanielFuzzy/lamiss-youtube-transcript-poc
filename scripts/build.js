@@ -28,6 +28,7 @@ const DEFAULT_API_URL = 'http://localhost:8080';
 
 const staticFiles = [
   ['src/popup/popup.html', 'popup/popup.html'],
+  ['src/popup/popup.css', 'popup/popup.css'],
   ['src/permission/permission.html', 'permission/permission.html'],
   ['src/chat/chat.html', 'chat/chat.html'],
   ['src/offscreen/offscreen.html', 'offscreen/offscreen.html'],
