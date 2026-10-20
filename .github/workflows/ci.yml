@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Builds compiled/ and runs every test/*.test.js. The client ID is a
+      # placeholder: Google is never contacted in tests.
+      - run: npm test
+        env:
+          LAMISS_GOOGLE_CLIENT_ID: ci-placeholder.apps.googleusercontent.com

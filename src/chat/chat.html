@@ -208,6 +208,60 @@
       text-decoration: underline;
     }
 
+    /* Shown instead of the conversation while signed out. */
+    .sign-in {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0;
+      padding: 16px 14px;
+      text-align: center;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface);
+    }
+
+    .sign-in[hidden] {
+      display: none;
+    }
+
+    .sign-in-title {
+      margin: 0;
+      font-weight: 600;
+    }
+
+    .sign-in-detail {
+      margin: 0;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .sign-in-detail.error {
+      color: var(--error);
+    }
+
+    .sign-in-button {
+      height: 34px;
+      padding: 0 16px;
+      font: inherit;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: white;
+      background: var(--accent-strong);
+    }
+
+    .sign-in-button:hover:not(:disabled) {
+      background: var(--accent);
+    }
+
+    .sign-in-button:disabled {
+      cursor: progress;
+      opacity: 0.7;
+    }
+
     .typing {
       display: inline-flex;
       gap: 4px;
@@ -442,6 +496,11 @@
   </section>
 
   <div id="messages" role="log" aria-live="polite" aria-label="Conversation with Lamiss">
+    <div id="signIn" class="sign-in" hidden>
+      <p class="sign-in-title">Sign in to use Lamiss</p>
+      <p id="signInDetail" class="sign-in-detail">Your conversations are saved to your Lamiss account.</p>
+      <button id="signInButton" class="sign-in-button" type="button">Sign in with Google</button>
+    </div>
     <p class="note">Ask Lamiss anything about this video. Your question is tied to the moment you ask it. Lamiss's questions and your answers show up here too.</p>
     <div id="log"></div>
     <div id="pending"></div>
@@ -470,6 +529,7 @@
 
   <script src="../shared/lamiss-config.js"></script>
   <script src="../shared/lamiss-api.js"></script>
+  <script src="../shared/lamiss-auth.js"></script>
   <script src="chat.js"></script>
 </body>
 </html>

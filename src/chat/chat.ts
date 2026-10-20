@@ -25,6 +25,9 @@ const chatAmountInput = document.getElementById('amountInput') as HTMLInputEleme
 const chatAmountValue = document.getElementById('amountValue') as HTMLOutputElement;
 const chatDifficultyInput = document.getElementById('difficultyInput') as HTMLInputElement;
 const chatDifficultyValue = document.getElementById('difficultyValue') as HTMLOutputElement;
+const chatSignIn = document.getElementById('signIn') as HTMLDivElement;
+const chatSignInDetail = document.getElementById('signInDetail') as HTMLParagraphElement;
+const chatSignInButton = document.getElementById('signInButton') as HTMLButtonElement;
 
 const CHAT_DIFFICULTIES: LamissQuestionDifficulty[] = ['EASY', 'MEDIUM', 'HARD'];
 const CHAT_DIFFICULTY_LABELS: Record<LamissQuestionDifficulty, string> = { EASY: 'Easy', MEDIUM: 'Medium', HARD: 'Hard' };
@@ -36,6 +39,8 @@ let chatRecordingStartedAt = 0;
 let chatRecordingAutoStop: number | undefined;
 let chatLogLoading = false;
 let chatLogStale = false;
+let chatSignedIn = false;
+let chatStarting = false;
 
 type ChatQuestion = {
   interactionId: string;
@@ -165,18 +170,78 @@ function chatResizeInput(): void {
   chatInput.style.height = `${chatInput.scrollHeight}px`;
 }
 
+// Signed out (or the session ran out): no conversation until the user signs in.
+function chatShowSignIn(detail?: { text: string; error?: boolean }): void {
+  chatSignedIn = false;
+  chatSessionId = undefined;
+  // The conversation belongs to the account that just left.
+  chatLog.replaceChildren();
+  chatPending.replaceChildren();
+  chatSessionStatus.textContent = LAMISS_SIGN_IN_REQUIRED_MESSAGE;
+  chatSignIn.hidden = false;
+  chatSignInDetail.textContent = detail?.text ?? 'Your conversations are saved to your Lamiss account.';
+  chatSignInDetail.classList.toggle('error', detail?.error === true);
+  chatSignInButton.disabled = false;
+  chatSignInButton.textContent = 'Sign in with Google';
+  chatRender();
+}
+
+// Follows the sign-in kept by the worker: starts the session once signed in.
+async function chatSyncAuth(): Promise<void> {
+  const state = await readAuthState();
+  if (state.status !== 'signedIn') {
+    if (chatSignedIn || chatSignIn.hidden) {
+      chatShowSignIn(state.status === 'expired' ? { text: LAMISS_SIGN_IN_AGAIN_MESSAGE } : undefined);
+    }
+    return;
+  }
+  chatSignIn.hidden = true;
+  if (!chatSignedIn) {
+    chatSignedIn = true;
+    await chatStartSession();
+  }
+}
+
+chatSignInButton.addEventListener('click', async () => {
+  chatSignInButton.disabled = true;
+  chatSignInButton.textContent = 'Signing in…';
+  chatSignInDetail.textContent = 'Continue in the Google window.';
+  chatSignInDetail.classList.remove('error');
+  const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
+    .catch((error: unknown): LamissSignInResult => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
+  if (!result?.ok) {
+    chatShowSignIn({ text: result?.error ?? 'Sign-in failed. Please try again.', error: result?.reason !== 'cancelled' });
+    return;
+  }
+  await chatSyncAuth();
+});
+
 async function chatStartSession(): Promise<void> {
   if (!chatVideoId || !Number.isInteger(chatTabId)) {
     chatSessionStatus.textContent = 'Open this chat from a YouTube video';
     return;
   }
+  if (chatStarting) {
+    return;
+  }
 
+  chatSessionStatus.textContent = 'Starting your session…';
+  chatStarting = true;
   // Through the worker, so this is the same session as Lamiss's live questions.
   const session = await chrome.runtime.sendMessage({ type: LAMISS_START_SESSION_MESSAGE, videoId: chatVideoId })
     .catch((error: unknown) => ({ ok: false, error: String(error), retryable: true })) as LamissCallResult<LamissLearningSession>;
+  chatStarting = false;
   if (!session.ok) {
+    if (session.signInRequired) {
+      chatShowSignIn({ text: session.error });
+      return;
+    }
     chatSessionStatus.textContent = 'Could not start a session';
     chatAddNote(session.error);
+    return;
+  }
+  if (!chatSignedIn) {
+    // Signed out while the session was starting.
     return;
   }
 
@@ -227,6 +292,9 @@ async function chatSend(question: ChatQuestion, userMessage: HTMLDivElement): Pr
     return;
   }
 
+  if (result.signInRequired) {
+    chatShowSignIn({ text: result.error });
+  }
   const failure = chatAddMessage('lamiss', `Lamiss couldn't answer: ${result.error}`, 'Lamiss', chatPending);
   failure.classList.add('error');
   if (result.retryable) {
@@ -387,7 +455,14 @@ chatCloseButton.addEventListener('click', () => {
 
 // Lamiss's questions, the user's answers and the feedback, from the live
 // connection of the tab this panel is in.
-chrome.runtime.onMessage.addListener((message: Partial<LamissLiveLogMessage> | undefined) => {
+chrome.runtime.onMessage.addListener((message: Partial<LamissLiveLogMessage> & { type?: string } | undefined, sender) => {
+  if (sender.id !== chrome.runtime.id) {
+    return false;
+  }
+  if (message?.type === LAMISS_AUTH_CHANGED_MESSAGE) {
+    void chatSyncAuth();
+    return false;
+  }
   if (message?.source !== LAMISS_LIVE_LOG_SOURCE || message.tabId !== chatTabId
     || chatSessionId === undefined || message.learningSessionId !== chatSessionId || !message.event) {
     return false;
@@ -410,4 +485,4 @@ chrome.runtime.onMessage.addListener((message: Partial<LamissLiveLogMessage> | u
 
 chatRender();
 void chatLoadSettings();
-void chatStartSession();
+void chatSyncAuth();
