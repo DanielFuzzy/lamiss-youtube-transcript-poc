@@ -506,7 +506,8 @@ type LamissPreferences = {
   };
 };
 
-type LamissVoice = { id: string; label: string; language: string; default: boolean };
+// language null: the voice speaks every language (the OpenAI provider).
+type LamissVoice = { id: string; label: string; language: string | null; default: boolean };
 
 type LamissVoiceList = {
   provider: string;
@@ -543,6 +544,13 @@ function fetchProfile(): Promise<LamissCallResult<LamissProfile>> {
 // them (grouped by language by the caller) when none is set.
 function voicesForLanguage(voices: LamissVoice[], language: string | null): LamissVoice[] {
   return language ? voices.filter(voice => voice.language === language) : voices;
+}
+
+// Whether the server has a voice for the language: a voice of that language,
+// or one that speaks every language. Without one the backend reads the text
+// with its fallback voice, which speaks another language.
+function lamissHasVoiceFor(list: LamissVoiceList | undefined, language: string): boolean {
+  return Boolean(list?.voices.some(voice => voice.language === null || voice.language === language));
 }
 
 // The question-frequency choices of the popup, as the existing gap setting.

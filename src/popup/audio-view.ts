@@ -32,7 +32,8 @@ const AUDIO_SILENT_LEVEL = 0.01;
 const AUDIO_SILENT_HINT_MS = 4000;
 const AUDIO_SPEED_SAVE_DELAY_MS = 400;
 
-// A short line in each language a Kokoro voice can speak; others preview in English.
+// A short line in each language a Kokoro voice can speak, and German for
+// voices that speak every language; others preview in English.
 const AUDIO_PREVIEW_PHRASES: Record<string, string> = {
   en: 'Hi! I\'m Lamiss. Let\'s learn together while you watch.',
   es: '¡Hola! Soy Lamiss. Aprendamos juntos mientras ves el vídeo.',
@@ -453,7 +454,8 @@ audioVoicePreviewButton.addEventListener('click', async () => {
 
   const voice = audioVoices?.voices.find(candidate => candidate.id === saved.voice.voiceId);
   const wanted = voice?.language ?? saved.learningLanguage ?? 'en';
-  const language = AUDIO_PREVIEW_PHRASES[wanted] ? wanted : 'en';
+  // A language without a voice would be read by another language's voice.
+  const language = AUDIO_PREVIEW_PHRASES[wanted] && lamissHasVoiceFor(audioVoices, wanted) ? wanted : 'en';
   const result = await synthesizeSpeech(AUDIO_PREVIEW_PHRASES[language], language);
   audioVoicePreviewButton.disabled = false;
   if (!result.ok) {

@@ -125,6 +125,16 @@ test('voices are filtered to the learning language, or all of them when none is 
   assert.equal(env.run('voicesForLanguage(voices, null)').length, 3);
 });
 
+test('a preview language needs a voice for it', () => {
+  const env = pageEnv();
+  env.context.kokoro = voices;
+  env.context.openai = { provider: 'openai', selectable: false, defaultSpeed: 1, voices: [{ id: 'coral', label: 'Coral', language: null, default: true }] };
+  assert.equal(env.run("lamissHasVoiceFor(kokoro, 'es')"), true);
+  assert.equal(env.run("lamissHasVoiceFor(kokoro, 'de')"), false);
+  assert.equal(env.run("lamissHasVoiceFor(openai, 'de')"), true);
+  assert.equal(env.run("lamissHasVoiceFor(undefined, 'en')"), false);
+});
+
 // FEEDBACK's language (the explanation language) picks the voice that reads it.
 test('speech language: the reported language, else the video\'s', () => {
   const env = pageEnv();
