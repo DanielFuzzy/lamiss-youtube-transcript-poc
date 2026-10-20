@@ -357,10 +357,36 @@ test('the offscreen document gets the token with each listen and speak request',
   const listen = env.runtimeSent.find(message => message.type === 'listen');
   const speak = env.runtimeSent.find(message => message.type === 'speak');
   assert.deepEqual(listen, { target: 'lamiss-offscreen', type: 'listen', requestId: 'r-1', accessToken: 'secret-token' });
-  assert.deepEqual(speak, { target: 'lamiss-offscreen', type: 'speak', requestId: 'r-2', text: 'Hola', language: 'es', accessToken: 'secret-token' });
+  assert.deepEqual(speak, { target: 'lamiss-offscreen', type: 'speak', requestId: 'r-2', text: 'Hola', language: 'es', accessToken: 'secret-token', volume: 1 });
   // The tab only hears about progress, never the token.
   assert.ok(!JSON.stringify(port.messages).includes('secret-token'));
   assert.ok(!JSON.stringify(env.tabsSent).includes('secret-token'));
+});
+
+test('the offscreen document gets the devices picked in the popup with listen and speak', async () => {
+  const env = backgroundEnv();
+  signIn(env);
+  env.local.data.set('lamissDeviceSettings', { micDeviceId: 'mic-2', speakerDeviceId: 'speaker-3', volume: 0.4 });
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  // A tab can't choose the devices: only the stored settings count.
+  port.send({ type: 'listen', requestId: 'r-1', micDeviceId: 'forged' });
+  port.send({ type: 'speak', requestId: 'r-2', text: 'Hola', language: 'es', speakerDeviceId: 'forged', volume: 0 });
+  await flush();
+
+  const listen = env.runtimeSent.find(message => message.type === 'listen');
+  const speak = env.runtimeSent.find(message => message.type === 'speak');
+  assert.deepEqual(listen, { target: 'lamiss-offscreen', type: 'listen', requestId: 'r-1', accessToken: 'secret-token', micDeviceId: 'mic-2' });
+  assert.deepEqual(speak, {
+    target: 'lamiss-offscreen',
+    type: 'speak',
+    requestId: 'r-2',
+    text: 'Hola',
+    language: 'es',
+    accessToken: 'secret-token',
+    speakerDeviceId: 'speaker-3',
+    volume: 0.4
+  });
 });
 
 test('browser start tries a silent sign-in for a returning user', async () => {

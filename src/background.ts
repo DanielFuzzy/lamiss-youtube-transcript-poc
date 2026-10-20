@@ -1011,10 +1011,17 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
     case 'listen':
       listeningPorts.set(message.requestId, live);
       // The offscreen document can't read the token; it comes with the request.
-      void readAccessTokenForOffscreen()
-        .then(async (accessToken) => {
+      // Nor the microphone picked in the popup.
+      void Promise.all([readAccessTokenForOffscreen(), readDeviceSettings()])
+        .then(async ([accessToken, devices]) => {
           await ensureOffscreenRecorder();
-          await chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'listen', requestId: message.requestId, accessToken });
+          await chrome.runtime.sendMessage({
+            target: 'lamiss-offscreen',
+            type: 'listen',
+            requestId: message.requestId,
+            accessToken,
+            ...(devices.micDeviceId ? { micDeviceId: devices.micDeviceId } : {})
+          });
         })
         .catch((error: unknown) => {
           listeningPorts.delete(message.requestId);
@@ -1033,8 +1040,8 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
       break;
     case 'speak':
       speakingPorts.set(message.requestId, live);
-      void readAccessTokenForOffscreen()
-        .then(async (accessToken) => {
+      void Promise.all([readAccessTokenForOffscreen(), readDeviceSettings()])
+        .then(async ([accessToken, devices]) => {
           await ensureOffscreenRecorder();
           await chrome.runtime.sendMessage({
             target: 'lamiss-offscreen',
@@ -1042,7 +1049,9 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
             requestId: message.requestId,
             text: message.text,
             language: message.language,
-            accessToken
+            accessToken,
+            ...(devices.speakerDeviceId ? { speakerDeviceId: devices.speakerDeviceId } : {}),
+            volume: devices.volume
           });
         })
         .catch((error: unknown) => {

@@ -108,6 +108,65 @@ function saveQuestionSettings(settings: LamissQuestionSettings): Promise<void> {
   return chrome.storage.local.set({ [LAMISS_QUESTION_SETTINGS_KEY]: settings });
 }
 
+// The microphone and speaker this browser profile uses for Lamiss, and its
+// voice volume (0–1). Device IDs belong to this machine and profile, so they
+// stay in extension storage and never go to the backend (TDR-0002).
+type LamissDeviceSettings = {
+  micDeviceId?: string;
+  speakerDeviceId?: string;
+  volume: number;
+};
+
+const LAMISS_DEVICE_SETTINGS_KEY = 'lamissDeviceSettings';
+
+const LAMISS_DEFAULT_DEVICE_SETTINGS: LamissDeviceSettings = { volume: 1 };
+
+function clampVolume(volume: unknown): number {
+  return typeof volume === 'number' && Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1;
+}
+
+async function readDeviceSettings(): Promise<LamissDeviceSettings> {
+  try {
+    const stored = await chrome.storage.local.get(LAMISS_DEVICE_SETTINGS_KEY);
+    const value = stored[LAMISS_DEVICE_SETTINGS_KEY] as Partial<LamissDeviceSettings> | undefined;
+    return {
+      ...(typeof value?.micDeviceId === 'string' && value.micDeviceId ? { micDeviceId: value.micDeviceId } : {}),
+      ...(typeof value?.speakerDeviceId === 'string' && value.speakerDeviceId ? { speakerDeviceId: value.speakerDeviceId } : {}),
+      volume: clampVolume(value?.volume ?? LAMISS_DEFAULT_DEVICE_SETTINGS.volume)
+    };
+  } catch {
+    return { ...LAMISS_DEFAULT_DEVICE_SETTINGS };
+  }
+}
+
+// Merges the change into what is stored. An empty device ID means "default".
+async function saveDeviceSettings(change: Partial<LamissDeviceSettings>): Promise<LamissDeviceSettings> {
+  const merged: LamissDeviceSettings = { ...(await readDeviceSettings()), ...change };
+  const next: LamissDeviceSettings = {
+    ...(merged.micDeviceId ? { micDeviceId: merged.micDeviceId } : {}),
+    ...(merged.speakerDeviceId ? { speakerDeviceId: merged.speakerDeviceId } : {}),
+    volume: clampVolume(merged.volume)
+  };
+  await chrome.storage.local.set({ [LAMISS_DEVICE_SETTINGS_KEY]: next });
+  return next;
+}
+
+// --- Popup ↔ content script (TDR-0002) -------------------------------------------
+
+// Popup → the active YouTube tab: same as clicking the in-page Lamiss button.
+const LAMISS_START_LEARNING_MESSAGE = 'lamiss:start-learning';
+// Popup → the active YouTube tab: replies { videoId, buttonState }.
+const LAMISS_PAGE_STATUS_MESSAGE = 'lamiss:page-status';
+
+type LamissPageStatus = { videoId: string | null; buttonState: string };
+
+// A page of this extension (popup, chat, offscreen) or its worker, never a
+// content script: those share the extension ID but run in a tab.
+function isFromExtensionPage(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && !sender.tab
+    && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
+}
+
 const LAMISS_UNREACHABLE_MESSAGE = `Could not reach Lamiss at ${LAMISS_API_BASE_URL}. Check your connection and try again.`;
 
 // signInRequired: the backend answered 401, so only signing in again helps.
@@ -331,9 +390,41 @@ function pickRecordingMimeType(): string {
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) ?? '';
 }
 
+// The microphone the user picked in the popup, or the default one when none
+// was picked or it is gone (unplugged, or a new browser profile).
+async function getMicrophoneStream(deviceId: string | undefined, audio: MediaTrackConstraints = {}): Promise<MediaStream> {
+  if (!deviceId) {
+    return navigator.mediaDevices.getUserMedia({ audio: Object.keys(audio).length > 0 ? audio : true });
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: { ...audio, deviceId: { exact: deviceId } } });
+  } catch (error) {
+    const name = error instanceof DOMException ? error.name : (error as { name?: string } | null)?.name;
+    if (name !== 'OverconstrainedError' && name !== 'NotFoundError') {
+      throw error;
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: Object.keys(audio).length > 0 ? audio : true });
+  }
+}
+
+// Plays on the speaker the user picked, falling back to the default one.
+async function routeAudioToSpeaker(audio: HTMLMediaElement, speakerDeviceId: string | undefined): Promise<void> {
+  const element = audio as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
+  if (!speakerDeviceId || typeof element.setSinkId !== 'function') {
+    return;
+  }
+  try {
+    await element.setSinkId(speakerDeviceId);
+  } catch (error) {
+    console.warn('Lamiss POC: chosen speaker unavailable, using the default one:', error);
+    await element.setSinkId('').catch(() => undefined);
+  }
+}
+
 async function openMicrophone(): Promise<MediaStream | null> {
   try {
-    return await navigator.mediaDevices.getUserMedia({ audio: true });
+    const { micDeviceId } = await readDeviceSettings();
+    return await getMicrophoneStream(micDeviceId);
   } catch (error) {
     const name = error instanceof DOMException ? error.name : '';
     if (name === 'NotAllowedError' || name === 'SecurityError') {
@@ -345,4 +436,120 @@ async function openMicrophone(): Promise<MediaStream | null> {
     }
     throw error;
   }
+}
+
+// --- Settings (TDR-0002) ---------------------------------------------------------
+
+// The languages the backend knows (its Language enum), as ISO 639-1 codes.
+const LAMISS_LANGUAGES: ReadonlyArray<{ code: string; name: string }> = [
+  { code: 'en', name: 'English' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'fr', name: 'French' },
+  { code: 'de', name: 'German' },
+  { code: 'it', name: 'Italian' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'zh', name: 'Chinese' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'bn', name: 'Bengali' },
+  { code: 'ur', name: 'Urdu' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'te', name: 'Telugu' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'uk', name: 'Ukrainian' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'cs', name: 'Czech' },
+  { code: 'tr', name: 'Turkish' },
+  { code: 'el', name: 'Greek' },
+  { code: 'nl', name: 'Dutch' },
+  { code: 'sv', name: 'Swedish' },
+  { code: 'no', name: 'Norwegian' },
+  { code: 'da', name: 'Danish' },
+  { code: 'fi', name: 'Finnish' },
+  { code: 'he', name: 'Hebrew' },
+  { code: 'vi', name: 'Vietnamese' },
+  { code: 'th', name: 'Thai' },
+  { code: 'id', name: 'Indonesian' }
+];
+
+function lamissLanguageName(code: string | null | undefined): string {
+  return LAMISS_LANGUAGES.find(language => language.code === code)?.name ?? (code ?? '');
+}
+
+type LamissProficiencyLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+type LamissKindness = 'GENTLE' | 'BALANCED' | 'STRICT';
+type LamissResponseLength = 'SHORT' | 'NORMAL' | 'DETAILED';
+
+type LamissPreferences = {
+  nativeLanguage: string | null;
+  learningLanguage: string | null;
+  proficiencyLevel: LamissProficiencyLevel | null;
+  tutor: {
+    kindness: LamissKindness;
+    responseLength: LamissResponseLength;
+    encouragement: boolean;
+    // null: the video's language.
+    explanationLanguage: string | null;
+  };
+  voice: {
+    // null: each language's default voice.
+    voiceId: string | null;
+    speed: number;
+  };
+};
+
+type LamissVoice = { id: string; label: string; language: string; default: boolean };
+
+type LamissVoiceList = {
+  provider: string;
+  selectable: boolean;
+  defaultSpeed: number;
+  voices: LamissVoice[];
+};
+
+// GET /api/auth/me
+type LamissProfile = LamissAuthUser & { displayName: string | null; pictureUrl: string | null };
+
+function fetchPreferences(): Promise<LamissCallResult<LamissPreferences>> {
+  return callLamiss<LamissPreferences>('/api/me/preferences', { headers: { accept: 'application/json' } });
+}
+
+// Always the full object; the backend answers with what it saved.
+function savePreferences(preferences: LamissPreferences): Promise<LamissCallResult<LamissPreferences>> {
+  return callLamiss<LamissPreferences>('/api/me/preferences', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(preferences)
+  });
+}
+
+function fetchVoices(): Promise<LamissCallResult<LamissVoiceList>> {
+  return callLamiss<LamissVoiceList>('/api/speech/voices', { headers: { accept: 'application/json' } });
+}
+
+function fetchProfile(): Promise<LamissCallResult<LamissProfile>> {
+  return callLamiss<LamissProfile>('/api/auth/me', { headers: { accept: 'application/json' } });
+}
+
+// The voices to offer for a learning language: that language's, or all of
+// them (grouped by language by the caller) when none is set.
+function voicesForLanguage(voices: LamissVoice[], language: string | null): LamissVoice[] {
+  return language ? voices.filter(voice => voice.language === language) : voices;
+}
+
+// The question-frequency choices of the popup, as the existing gap setting.
+const LAMISS_QUESTION_FREQUENCIES = [
+  { key: 'LESS', seconds: 300 },
+  { key: 'NORMAL', seconds: 120 },
+  { key: 'MORE', seconds: 60 }
+] as const;
+
+type LamissQuestionFrequency = typeof LAMISS_QUESTION_FREQUENCIES[number]['key'];
+
+// The choice closest to a stored gap (the chat panel's slider has more stops).
+function questionFrequencyFor(seconds: number): LamissQuestionFrequency {
+  return LAMISS_QUESTION_FREQUENCIES.reduce((best, choice) =>
+    Math.abs(choice.seconds - seconds) < Math.abs(best.seconds - seconds) ? choice : best).key;
 }

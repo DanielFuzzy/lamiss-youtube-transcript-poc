@@ -51,7 +51,8 @@ function fetchCaptionResourceInMainWorld(tabId: number, captionUrl: string): Pro
 
 type TranscriptLoadResponse = CaptionFetchResult | { success: boolean; error: string };
 
-// Shared by the popup's LOAD_TRANSCRIPT message and the in-page Lamiss button.
+// Shared by the LOAD_TRANSCRIPT message (no longer sent by the popup; kept for
+// the debug scripts) and the in-page Lamiss button.
 // `respond` is called exactly once, by whichever step finishes the load.
 function startTranscriptLoad(tabId: number, respond: (response: TranscriptLoadResponse) => void): void {
   const parsed = parseYouTubeWatchUrl(window.location.href);
@@ -678,6 +679,29 @@ chrome.runtime.onMessage.addListener((message: { type?: string; state?: { status
   if (status === 'signedIn' || status === 'signedOut' || status === 'expired') {
     applyLamissAuthStatus(status);
   }
+  return false;
+});
+
+// The toolbar popup's Start Learning button and status line. Only pages of
+// this extension may send these: never another extension, nor a content script.
+chrome.runtime.onMessage.addListener((message: { type?: string } | undefined, sender, sendResponse) => {
+  if ((message?.type !== LAMISS_START_LEARNING_MESSAGE && message?.type !== LAMISS_PAGE_STATUS_MESSAGE) || !isFromExtensionPage(sender)) {
+    return false;
+  }
+  const parsed = parseYouTubeWatchUrl(window.location.href);
+  const videoId = parsed.success && parsed.videoId ? parsed.videoId : null;
+  if (message.type === LAMISS_START_LEARNING_MESSAGE && videoId) {
+    // Picks up an in-app navigation the button hasn't seen yet.
+    ensureLamissButton();
+    if (lamissButtonState === 'ready') {
+      setLamissChatOpen(true);
+    } else {
+      // Runs in the background; the popup only waits for the state it starts.
+      void onLamissButtonClick();
+    }
+  }
+  const status: LamissPageStatus = { videoId, buttonState: lamissButtonState };
+  sendResponse(status);
   return false;
 });
 

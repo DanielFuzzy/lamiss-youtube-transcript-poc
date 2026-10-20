@@ -105,6 +105,7 @@ class FakeWebSocket {
 
 // options.scripts: compiled files to load, in order (paths under compiled/).
 // options.withoutSessionStorage: a content-script context.
+// options.globals: more globals for the scripts, added before they load.
 function createExtensionEnv(options = {}) {
   const fetchCalls = [];
   let responder = options.responder ?? (async () => ({ status: 404, json: { detail: 'not stubbed' } }));
@@ -192,6 +193,7 @@ function createExtensionEnv(options = {}) {
     Blob,
     TextDecoder,
     TextEncoder,
+    DOMException,
     crypto: globalThis.crypto,
     btoa,
     atob,
@@ -200,7 +202,9 @@ function createExtensionEnv(options = {}) {
     clearTimeout,
     setInterval,
     clearInterval,
-    WebSocket: FakeWebSocket
+    WebSocket: FakeWebSocket,
+    // Extra globals a script needs (document, navigator, Audio, …).
+    ...(options.globals ?? {})
   });
 
   const load = (file) => {
