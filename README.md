@@ -105,14 +105,42 @@ has a home view and one view per settings category, each with a back arrow:
   answer to `lamiss:page-status`. The content script only accepts both
   messages from this extension's own pages. Signed out, the popup shows
   **Sign in with Google** and Tutor Behavior / Profile & Account are disabled.
+  With a daily goal set, a compact "12 of 30 min today" bar sits under Start
+  Learning (`GET /api/me/practice/today`); without one it is hidden.
 - **Double Captions**: "Coming soon"; there is nothing to switch on yet.
 - **Audio & Voice**: microphone and speaker (with a level-meter microphone test
   and a test tone), tutor voice (`GET /api/speech/voices`, filtered to the
   learning language), **Preview voice**, speaking speed, and volume.
 - **Tutor Behavior**: kindness, question frequency, response length,
-  encouragement, explanation language.
-- **Profile & Account**: name, email and picture from `/api/auth/me`, native and
-  learning language, level, and **Log Out**.
+  encouragement, explanation language, and **Auto-pause for questions**
+  (`tutor.autoPause`; see below).
+- **Profile & Account**: name, email and picture from `/api/auth/me` (read-only:
+  Google refreshes them at every sign-in). Clicking the profile row edits the
+  username (3–20 of `A–Z a–z 0–9 _`, checked before sending) with
+  `PATCH /api/me/profile`; `400 invalid_username` and `409 username_taken` show
+  a plain message in the form. Native and learning language, level,
+  **Learning goal** (Not set, Conversation, Vocabulary, Grammar, Listening,
+  Pronunciation), **Daily goal** (a slider: Off or 5–240 min) with today's
+  progress, and **Log Out**. "Today" is the browser's local day: the popup sends
+  `Intl.DateTimeFormat().resolvedOptions().timeZone` as `?timeZone=`.
+
+Only Double Captions (and the tutor's tone for the pre-generated questions,
+which all users of a video share) are still to come.
+
+**Auto-pause.** On (the default), the backend sends `PAUSE_VIDEO` before each
+question and `RESUME_VIDEO` after the feedback, and the video stays paused
+while the question is open, as before. Off, neither is sent: the content script
+keeps the question card open over the playing video and lowers the video's
+volume to 20% (never raising a quieter one) while Lamiss asks, listens, checks
+the answer and reads the feedback, then puts the user's volume back (also when
+the card closes, the user leaves the video, or an error ends the spoken
+answer). If the user changes the volume meanwhile, theirs is kept. With nothing
+to resume, the card closes by itself a few seconds after the feedback (or on
+**Close**), and a video the user paused stays paused. The content script holds
+the video paused only for a question that `PAUSE_VIDEO` announced, and keeps
+reporting positions while a question plays over the video. The worker stores
+with each pending question whether it was paused, so a question replayed after
+a reconnect pauses only if it did the first time.
 
 Each view is its own script under `src/popup/` (`home-view.ts`,
 `audio-view.ts`, `tutor-view.ts`, `profile-view.ts`) on top of
@@ -124,7 +152,8 @@ Where the settings live:
 |---|---|
 | `chrome.storage.local` `lamissDeviceSettings` | `{ micDeviceId?, speakerDeviceId?, volume }` (volume 0–1). Device IDs belong to this machine and browser profile and never leave the extension. The chat panel records with `micDeviceId`; the worker adds `micDeviceId` to the offscreen document's `listen` and `speakerDeviceId` + `volume` to its `speak` messages. A device that is gone falls back to the default one. |
 | `chrome.storage.local` `lamissQuestionSettings` | Question frequency (`minSecondsBetweenQuestions`: Less 300, Normal 120, More 60) and difficulty, also set from the chat panel. |
-| Backend, `GET`/`PUT /api/me/preferences` | Languages, level, kindness, response length, encouragement, explanation language, voice, speed. |
+| Backend, `GET`/`PUT /api/me/preferences` | Languages, level, learning goal, daily goal minutes, kindness, response length, encouragement, explanation language, auto-pause, voice, speed. |
+| Backend, `PATCH /api/me/profile` | Username. |
 
 To see every view in a browser with a stubbed backend and fake media devices:
 
