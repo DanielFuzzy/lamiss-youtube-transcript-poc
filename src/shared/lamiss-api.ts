@@ -172,7 +172,7 @@ const LAMISS_UNREACHABLE_MESSAGE = `Could not reach Lamiss at ${LAMISS_API_BASE_
 // signInRequired: the backend answered 401, so only signing in again helps.
 type LamissCallResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status?: number; error: string; retryable: boolean; signInRequired?: boolean };
+  | { ok: false; status?: number; error: string; retryable: boolean; signInRequired?: boolean; errorCode?: string };
 
 type LamissCallOptions = {
   // The public sign-in endpoints: no token is sent, and a 401 is an ordinary error.
@@ -247,7 +247,9 @@ async function callLamiss<T>(path: string, init: RequestInit, options: LamissCal
         ok: false,
         status: response.status,
         error: problem?.detail ?? `HTTP ${response.status}`,
-        retryable: problem?.retryable ?? response.status >= 500
+        retryable: problem?.retryable ?? response.status >= 500,
+        // TDR-0001: the machine-readable reason, when the backend gives one.
+        ...(typeof problem?.errorCode === 'string' ? { errorCode: problem.errorCode } : {})
       };
     }
     return { ok: true, data: await response.json() as T };
@@ -487,17 +489,26 @@ function lamissLanguageName(code: string | null | undefined): string {
 type LamissProficiencyLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 type LamissKindness = 'GENTLE' | 'BALANCED' | 'STRICT';
 type LamissResponseLength = 'SHORT' | 'NORMAL' | 'DETAILED';
+type LamissLearningGoal = 'CONVERSATION' | 'VOCABULARY' | 'GRAMMAR' | 'LISTENING' | 'PRONUNCIATION';
 
+// The fields added by the TDR-0002 addendum are optional here: an older
+// backend leaves them out, and a PUT without them means "not set".
 type LamissPreferences = {
   nativeLanguage: string | null;
   learningLanguage: string | null;
   proficiencyLevel: LamissProficiencyLevel | null;
+  // null: no goal.
+  learningGoal?: LamissLearningGoal | null;
+  // 5–240, or null: no daily goal.
+  dailyGoalMinutes?: number | null;
   tutor: {
     kindness: LamissKindness;
     responseLength: LamissResponseLength;
     encouragement: boolean;
     // null: the video's language.
     explanationLanguage: string | null;
+    // Pause the video while Lamiss asks (the backend reads back true when not set).
+    autoPause?: boolean;
   };
   voice: {
     // null: each language's default voice.
@@ -538,6 +549,91 @@ function fetchVoices(): Promise<LamissCallResult<LamissVoiceList>> {
 
 function fetchProfile(): Promise<LamissCallResult<LamissProfile>> {
   return callLamiss<LamissProfile>('/api/auth/me', { headers: { accept: 'application/json' } });
+}
+
+// --- Goals and profile editing (TDR-0002 addendum) ----------------------------------
+
+const LAMISS_LEARNING_GOALS: ReadonlyArray<{ goal: LamissLearningGoal; label: string }> = [
+  { goal: 'CONVERSATION', label: 'Conversation' },
+  { goal: 'VOCABULARY', label: 'Vocabulary' },
+  { goal: 'GRAMMAR', label: 'Grammar' },
+  { goal: 'LISTENING', label: 'Listening' },
+  { goal: 'PRONUNCIATION', label: 'Pronunciation' }
+];
+
+const LAMISS_DAILY_GOAL_MIN_MINUTES = 5;
+const LAMISS_DAILY_GOAL_MAX_MINUTES = 240;
+
+// The daily-goal slider: 0 is "Off", then 5–240 minutes.
+function dailyGoalFromSlider(value: number): number | null {
+  if (!Number.isFinite(value) || value < LAMISS_DAILY_GOAL_MIN_MINUTES) {
+    return null;
+  }
+  return Math.min(LAMISS_DAILY_GOAL_MAX_MINUTES, Math.round(value));
+}
+
+function formatDailyGoal(minutes: number | null | undefined): string {
+  return minutes ? `${minutes} min` : 'Off';
+}
+
+type LamissPracticeToday = { date: string; practicedMinutes: number; goalMinutes: number | null };
+
+// The browser's IANA time zone, which decides where "today" starts.
+function lamissLocalTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+function fetchPracticeToday(timeZone: string = lamissLocalTimeZone()): Promise<LamissCallResult<LamissPracticeToday>> {
+  return callLamiss<LamissPracticeToday>(`/api/me/practice/today?timeZone=${encodeURIComponent(timeZone)}`, {
+    headers: { accept: 'application/json' }
+  });
+}
+
+// "12 of 30 min today" and how far along the bar is (0–1), or undefined when
+// there is no daily goal.
+function describePracticeProgress(practice: LamissPracticeToday | undefined): { text: string; fraction: number; done: boolean } | undefined {
+  const goal = practice?.goalMinutes;
+  if (!practice || !goal || goal <= 0) {
+    return undefined;
+  }
+  const practiced = Math.max(0, Math.floor(practice.practicedMinutes || 0));
+  return {
+    text: `${practiced} of ${goal} min today`,
+    fraction: Math.min(1, practiced / goal),
+    done: practiced >= goal
+  };
+}
+
+// Same rules as the backend's domain.Username (TDR-0002 decision 12).
+const LAMISS_USERNAME_PATTERN = /^[A-Za-z0-9_]{3,20}$/;
+const LAMISS_USERNAME_RULES = 'Use 3–20 letters, numbers or underscores.';
+
+// Why a username can't be saved, or undefined when it can.
+function usernameProblem(username: string): string | undefined {
+  return LAMISS_USERNAME_PATTERN.test(username) ? undefined : LAMISS_USERNAME_RULES;
+}
+
+function updateUsername(username: string): Promise<LamissCallResult<LamissProfile>> {
+  return callLamiss<LamissProfile>('/api/me/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ username })
+  });
+}
+
+// A friendly message for a failed username change.
+function describeUsernameFailure(result: { ok: false; status?: number; error: string; errorCode?: string }): string {
+  if (result.status === 409 || result.errorCode === 'username_taken') {
+    return 'That username is already taken. Try another one.';
+  }
+  if (result.errorCode === 'invalid_username') {
+    return LAMISS_USERNAME_RULES;
+  }
+  return result.error;
 }
 
 // The voices to offer for a learning language: that language's, or all of

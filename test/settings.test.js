@@ -82,7 +82,7 @@ test('preferences: a 400 shows the backend message; a 401 asks to sign in again'
   }));
   env.context.changed = preferences;
   const rejected = plain(await env.run('savePreferences(changed)'));
-  assert.deepEqual(rejected, { ok: false, status: 400, error: 'Unknown language code: xx', retryable: false });
+  assert.deepEqual(rejected, { ok: false, status: 400, error: 'Unknown language code: xx', retryable: false, errorCode: 'invalid_preferences' });
 
   env.setResponder(async () => ({ status: 401, json: { detail: 'Unauthenticated' } }));
   const expired = plain(await env.run('fetchPreferences()'));
@@ -176,4 +176,99 @@ test('only extension pages count as extension pages', () => {
   for (const name of ['chat', 'contentScript', 'otherExtension', 'otherExtensionContentScript', 'otherSite']) {
     assert.equal(env.run(`isFromExtensionPage(senders.${name})`), false, name);
   }
+});
+
+// --- TDR-0002 addendum: auto-pause, goals, practice and username ---------------
+
+test('preferences: autoPause, learningGoal and dailyGoalMinutes go out in the full PUT body', async () => {
+  const env = pageEnv(async (url, init) => ({ json: JSON.parse(init.body) }));
+  env.context.changed = { ...preferences, learningGoal: 'CONVERSATION', dailyGoalMinutes: 30, tutor: { ...preferences.tutor, autoPause: false } };
+  const saved = plain(await env.run('savePreferences(changed)'));
+  assert.equal(saved.ok, true);
+  const body = JSON.parse(env.fetchCalls[0].init.body);
+  assert.equal(body.learningGoal, 'CONVERSATION');
+  assert.equal(body.dailyGoalMinutes, 30);
+  assert.equal(body.tutor.autoPause, false);
+  // The fields the first PUT already required are still there.
+  assert.equal(body.tutor.kindness, 'BALANCED');
+  assert.equal(body.voice.speed, 0.95);
+});
+
+test('learning goals match the backend enum', () => {
+  const env = pageEnv();
+  assert.deepEqual(plain(env.run('LAMISS_LEARNING_GOALS')).map(entry => entry.goal), ['CONVERSATION', 'VOCABULARY', 'GRAMMAR', 'LISTENING', 'PRONUNCIATION']);
+});
+
+test('daily goal slider: 0 is off, then 5–240 minutes', () => {
+  const env = pageEnv();
+  assert.equal(env.run('dailyGoalFromSlider(0)'), null);
+  assert.equal(env.run('dailyGoalFromSlider(4)'), null);
+  assert.equal(env.run('dailyGoalFromSlider(5)'), 5);
+  assert.equal(env.run('dailyGoalFromSlider(30)'), 30);
+  assert.equal(env.run('dailyGoalFromSlider(240)'), 240);
+  assert.equal(env.run('dailyGoalFromSlider(500)'), 240);
+  assert.equal(env.run('dailyGoalFromSlider(NaN)'), null);
+  assert.equal(env.run('formatDailyGoal(30)'), '30 min');
+  assert.equal(env.run('formatDailyGoal(null)'), 'Off');
+});
+
+test('practice today: GET with the local IANA time zone, encoded', async () => {
+  const today = { date: '2026-10-20', practicedMinutes: 12, goalMinutes: 30 };
+  const env = pageEnv(async () => ({ json: today }));
+  assert.deepEqual(plain(await env.run("fetchPracticeToday('America/Argentina/Buenos_Aires')")), { ok: true, data: today });
+  assert.equal(env.fetchCalls[0].url, `${API_BASE_URL}/api/me/practice/today?timeZone=America%2FArgentina%2FBuenos_Aires`);
+  assert.equal(env.fetchCalls[0].headers.get('authorization'), 'Bearer secret-token');
+
+  // By default the browser's own zone.
+  await env.run('fetchPracticeToday()');
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  assert.equal(new URL(env.fetchCalls[1].url).searchParams.get('timeZone'), zone);
+  assert.equal(env.run('lamissLocalTimeZone()'), zone);
+});
+
+test('practice progress: "12 of 30 min today", nothing without a goal', () => {
+  const env = pageEnv();
+  assert.deepEqual(plain(env.run("describePracticeProgress({ date: '2026-10-20', practicedMinutes: 12, goalMinutes: 30 })")),
+    { text: '12 of 30 min today', fraction: 0.4, done: false });
+  assert.deepEqual(plain(env.run("describePracticeProgress({ date: '2026-10-20', practicedMinutes: 45, goalMinutes: 30 })")),
+    { text: '45 of 30 min today', fraction: 1, done: true });
+  assert.equal(env.run("describePracticeProgress({ date: '2026-10-20', practicedMinutes: 12, goalMinutes: null })"), undefined);
+  assert.equal(env.run('describePracticeProgress(undefined)'), undefined);
+});
+
+test('username rules match domain.Username', () => {
+  const env = pageEnv();
+  for (const ok of ['abc', 'daniel_s', 'A1_b2', 'x'.repeat(20)]) {
+    assert.equal(env.run(`usernameProblem(${JSON.stringify(ok)})`), undefined, ok);
+  }
+  for (const bad of ['', 'ab', 'x'.repeat(21), 'dan iel', 'daniel-s', 'dañiel', 'a.b.c']) {
+    assert.equal(env.run(`usernameProblem(${JSON.stringify(bad)})`), 'Use 3–20 letters, numbers or underscores.', bad);
+  }
+});
+
+test('profile PATCH: 200 is the new profile, 400 and 409 get friendly messages', async () => {
+  const profile = { id: 7, email: 'ana@example.com', username: 'ana_l', displayName: 'Ana López', pictureUrl: null };
+  let reply = { json: profile };
+  const env = pageEnv(async () => reply);
+
+  assert.deepEqual(plain(await env.run("updateUsername('ana_l')")), { ok: true, data: profile });
+  const patch = env.fetchCalls[0];
+  assert.equal(patch.url, `${API_BASE_URL}/api/me/profile`);
+  assert.equal(patch.init.method, 'PATCH');
+  assert.equal(patch.headers.get('content-type'), 'application/json');
+  assert.equal(patch.headers.get('authorization'), 'Bearer secret-token');
+  assert.deepEqual(JSON.parse(patch.init.body), { username: 'ana_l' });
+
+  reply = { status: 409, json: { detail: 'Username already taken', errorCode: 'username_taken', retryable: false } };
+  env.context.taken = await env.run("updateUsername('bob')");
+  assert.equal(env.context.taken.errorCode, 'username_taken');
+  assert.equal(env.run('describeUsernameFailure(taken)'), 'That username is already taken. Try another one.');
+
+  reply = { status: 400, json: { detail: 'Invalid username', errorCode: 'invalid_username', retryable: false } };
+  env.context.invalid = await env.run("updateUsername('b o')");
+  assert.equal(env.run('describeUsernameFailure(invalid)'), 'Use 3–20 letters, numbers or underscores.');
+
+  reply = { status: 500, json: { detail: 'Something broke', retryable: true } };
+  env.context.broken = await env.run("updateUsername('bob')");
+  assert.equal(env.run('describeUsernameFailure(broken)'), 'Something broke');
 });
