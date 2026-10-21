@@ -188,6 +188,30 @@ async function savePopupPreferences(
   return { error };
 }
 
+// --- Daily goal progress ------------------------------------------------------------
+
+// Today's practice, asked for each time a view shows it (it grows while a
+// video plays).
+function loadPopupPractice(): Promise<LamissCallResult<LamissPracticeToday>> {
+  return fetchPracticeToday(lamissLocalTimeZone());
+}
+
+// Shows "12 of 30 min today" and its bar, or hides them when there is no goal.
+function renderPracticeProgress(
+  parts: { container: HTMLElement; text: HTMLElement; fill: HTMLElement },
+  practice: LamissPracticeToday | undefined
+): void {
+  const progress = describePracticeProgress(practice);
+  parts.container.hidden = !progress;
+  if (!progress) {
+    return;
+  }
+  parts.text.textContent = progress.text;
+  parts.fill.style.width = `${Math.round(progress.fraction * 100)}%`;
+  parts.container.dataset.done = String(progress.done);
+  parts.container.title = progress.done ? 'Daily goal reached' : '';
+}
+
 // --- Form helpers -------------------------------------------------------------------
 
 function fillLanguageSelect(select: HTMLSelectElement, emptyLabel: string, value: string | null): void {

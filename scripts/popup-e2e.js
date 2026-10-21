@@ -57,9 +57,15 @@ let preferences = {
   nativeLanguage: 'es',
   learningLanguage: 'en',
   proficiencyLevel: 'B1',
-  tutor: { kindness: 'BALANCED', responseLength: 'NORMAL', encouragement: true, explanationLanguage: null },
+  learningGoal: null,
+  dailyGoalMinutes: null,
+  tutor: { kindness: 'BALANCED', responseLength: 'NORMAL', encouragement: true, explanationLanguage: null, autoPause: true },
   voice: { voiceId: null, speed: 0.95 }
 };
+// Minutes practiced today, whatever the goal.
+const PRACTICED_TODAY = 12;
+// PATCH /api/me/profile answers 409 for this one.
+const TAKEN_USERNAME = 'taken_name';
 const kokoroVoices = {
   provider: 'kokoro',
   selectable: true,
@@ -99,7 +105,7 @@ async function answerBackend(route, apiBase) {
   const url = new URL(request.url());
   const call = `${request.method()} ${url.pathname}`;
   const authorized = request.headers().authorization === 'Bearer e2e-token';
-  backendCalls.push({ call, authorized, body: request.postData() });
+  backendCalls.push({ call, authorized, body: request.postData(), timeZone: url.searchParams.get('timeZone') });
   const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*' };
   if (request.method() === 'OPTIONS') {
@@ -111,6 +117,29 @@ async function answerBackend(route, apiBase) {
   switch (call) {
     case 'GET /api/auth/me':
       return json(200, user);
+    case 'GET /api/me/practice/today': {
+      const zone = url.searchParams.get('timeZone');
+      try {
+        new Intl.DateTimeFormat('en', { timeZone: zone || undefined });
+      } catch {
+        return json(400, { detail: 'Unknown time zone', errorCode: 'invalid_time_zone' });
+      }
+      if (!zone) {
+        return json(400, { detail: 'Missing time zone', errorCode: 'invalid_time_zone' });
+      }
+      return json(200, { date: '2026-10-20', practicedMinutes: PRACTICED_TODAY, goalMinutes: preferences.dailyGoalMinutes ?? null });
+    }
+    case 'PATCH /api/me/profile': {
+      const { username } = JSON.parse(request.postData());
+      if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
+        return json(400, { detail: 'Invalid username', errorCode: 'invalid_username' });
+      }
+      if (username.toLowerCase() === TAKEN_USERNAME) {
+        return json(409, { detail: 'Username already taken', errorCode: 'username_taken' });
+      }
+      user.username = username;
+      return json(200, user);
+    }
     case 'GET /api/me/preferences':
       return json(200, preferences);
     case 'PUT /api/me/preferences':
@@ -293,7 +322,17 @@ async function main() {
     await popup.locator('#explanationSelect').selectOption('es');
     await popup.waitForSelector('#tutorSaveState[data-tone="saved"]');
     check(preferences.tutor.explanationLanguage === 'es', 'tutor: explanation language saved');
+    check(await popup.locator('#autoPauseInput').isChecked(), 'tutor: auto-pause shows on (not set reads back true)');
+    await popup.locator('#autoPauseInput').click();
+    await popup.waitForSelector('#tutorSaveState[data-tone="saved"]');
+    const lastPut = () => JSON.parse(backendCalls.filter(call => call.call === 'PUT /api/me/preferences').at(-1).body);
+    check(lastPut().tutor.autoPause === false && preferences.tutor.autoPause === false, 'tutor: auto-pause off saved with PUT (tutor.autoPause: false)');
+    check((await popup.locator('#autoPauseHint').textContent()).includes('keeps playing'), 'tutor: the hint says the video keeps playing');
     await shotBottom('08-tutor-saved', 'tutor');
+    await popup.locator('#autoPauseInput').click();
+    await popup.waitForSelector('#tutorSaveState[data-tone="saved"]');
+    check(lastPut().tutor.autoPause === true, 'tutor: auto-pause back on saved with PUT');
+    await shotBottom('08b-tutor-auto-pause-on', 'tutor');
     await back('tutor');
 
     // Profile & Account.
@@ -304,8 +343,58 @@ async function main() {
     await popup.locator('#levelSelect').selectOption('B2');
     await popup.waitForSelector('#profileSaveState[data-tone="saved"]');
     check(preferences.proficiencyLevel === 'B2', 'profile: level saved');
+    check(await popup.locator('#profileProgress').isHidden(), 'profile: no progress without a daily goal');
+    check(await popup.locator('#dailyGoalValue').textContent() === 'Off', 'profile: daily goal shows Off');
+    const goalOptions = await popup.locator('#goalSelect option').allTextContents();
+    check(goalOptions.join(',') === 'Not set,Conversation,Vocabulary,Grammar,Listening,Pronunciation', `profile: learning goals (${goalOptions.join(', ')})`);
     await shot('09-profile');
+
+    // Learning goal and daily goal.
+    const putCount = () => backendCalls.filter(call => call.call === 'PUT /api/me/preferences').length;
+    let before = putCount();
+    await popup.locator('#goalSelect').selectOption('CONVERSATION');
+    await popup.waitForSelector('#profileSaveState[data-tone="saved"]');
+    check(putCount() === before + 1 && lastPut().learningGoal === 'CONVERSATION', 'profile: learning goal saved with PUT (learningGoal: CONVERSATION)');
+    before = putCount();
+    // fill() fires input and change, like letting go of the thumb.
+    await popup.locator('#dailyGoalInput').fill('30');
+    await popup.waitForSelector('#profileProgress:not([hidden])', { timeout: 10000 });
+    check(putCount() === before + 1 && lastPut().dailyGoalMinutes === 30 && lastPut().learningGoal === 'CONVERSATION', `profile: daily goal saved with PUT (dailyGoalMinutes: 30), the goal kept (${putCount() - before} PUT)`);
+    check(await popup.locator('#dailyGoalValue').textContent() === '30 min', 'profile: the slider shows 30 min');
+    check(await popup.locator('#profileProgressText').textContent() === '12 of 30 min today', `profile: progress "${await popup.locator('#profileProgressText').textContent()}"`);
+    const practiceCall = backendCalls.filter(call => call.call === 'GET /api/me/practice/today').at(-1);
+    const browserZone = await popup.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+    check(practiceCall?.timeZone === browserZone, `profile: today's practice asked for in the browser's time zone (${practiceCall?.timeZone})`);
+    const progressWidth = await popup.locator('#profileProgressFill').evaluate(fill => fill.style.width);
+    check(progressWidth === '40%', `profile: progress bar at 40% (${progressWidth})`);
+    await shotBottom('09b-profile-goals', 'profile');
+
+    // Username: the rules, a taken name, then a new one.
+    await popup.locator('#profileEditButton').click();
+    check(await popup.locator('#usernameForm').isVisible(), 'profile: the profile row opens the username edit');
+    check(await popup.locator('#usernameInput').inputValue() === 'daniel', 'profile: the edit starts from the current username');
+    const patches = () => backendCalls.filter(call => call.call === 'PATCH /api/me/profile');
+    await popup.locator('#usernameInput').fill('da');
+    await popup.locator('#usernameSaveButton').click();
+    check(await popup.locator('#usernameMessage').textContent() === 'Use 3–20 letters, numbers or underscores.' && patches().length === 0, 'profile: a too-short username is refused before any PATCH');
+    await popup.locator('#usernameInput').fill(TAKEN_USERNAME);
+    await popup.locator('#usernameSaveButton').click();
+    await popup.waitForSelector('#usernameMessage:has-text("taken")', { timeout: 10000 });
+    check(await popup.locator('#usernameMessage').textContent() === 'That username is already taken. Try another one.', 'profile: 409 username_taken shows a friendly message');
+    check(await popup.locator('#usernameForm').isVisible(), 'profile: the edit stays open after a 409');
+    await shot('09c-profile-username-taken');
+    await popup.locator('#usernameInput').fill('daniel_s');
+    await popup.locator('#usernameSaveButton').click();
+    await popup.waitForSelector('#usernameForm[hidden]', { state: 'attached', timeout: 10000 });
+    check(JSON.parse(patches().at(-1).body).username === 'daniel_s', 'profile: PATCH /api/me/profile carries the new username');
+    check(await popup.locator('#profileUsername').textContent() === '@daniel_s', 'profile: the new username shows after the 200');
+    await shot('09d-profile-username-saved');
     await back('profile');
+
+    // Home: today's progress, compact.
+    await popup.waitForSelector('#homeProgress:not([hidden])', { timeout: 10000 });
+    check(await popup.locator('#homeProgressText').textContent() === '12 of 30 min today', 'home: today\'s progress under Start Learning');
+    await shot('09e-home-progress');
 
     // A 400 shows the backend's message.
     await popup.route(`${apiBase}/api/me/preferences`, route => route.request().method() === 'PUT'
@@ -350,7 +439,11 @@ async function main() {
       && typeof body.tutor.encouragement === 'boolean'
       && typeof body.voice.speed === 'number' && body.voice.speed >= 0.5 && body.voice.speed <= 2
       && code(body.nativeLanguage) && code(body.learningLanguage) && code(body.tutor.explanationLanguage)
-      && (body.proficiencyLevel === null || /^[ABC][12]$/.test(body.proficiencyLevel))), `every PUT is a complete TDR-0002 body (${puts.length})`);
+      && (body.proficiencyLevel === null || /^[ABC][12]$/.test(body.proficiencyLevel))
+      && (body.learningGoal == null || ['CONVERSATION', 'VOCABULARY', 'GRAMMAR', 'LISTENING', 'PRONUNCIATION'].includes(body.learningGoal))
+      && (body.dailyGoalMinutes == null || (Number.isInteger(body.dailyGoalMinutes) && body.dailyGoalMinutes >= 5 && body.dailyGoalMinutes <= 240))
+      && (body.tutor.autoPause === undefined || typeof body.tutor.autoPause === 'boolean')), `every PUT is a complete TDR-0002 body (${puts.length})`);
+    check(backendCalls.filter(call => call.call === 'GET /api/me/practice/today').length > 0, 'practice: read with a time zone the stub accepted');
   } finally {
     await context.close();
     fs.rmSync(userDataDir, { recursive: true, force: true });

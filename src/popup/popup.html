@@ -35,6 +35,14 @@
       </span>
     </button>
 
+    <div id="homeProgress" class="progress progress-compact" hidden>
+      <div class="progress-row">
+        <span class="progress-label">Daily goal</span>
+        <span id="homeProgressText" class="progress-text"></span>
+      </div>
+      <span class="progress-bar" aria-hidden="true"><span id="homeProgressFill" class="progress-fill"></span></span>
+    </div>
+
     <nav class="categories" aria-label="Settings">
       <button class="category" type="button" data-open="captions">
         <span class="tile tile-purple" aria-hidden="true"><span class="tile-cc">CC</span></span>
@@ -319,13 +327,18 @@
           </div>
         </div>
 
-        <section class="card note-card">
-          <p class="note-title">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-            Auto-pause for questions
-          </p>
-          <p>Lamiss pauses the video while it asks you something. Turning that off is coming later.</p>
-        </section>
+        <div class="toggle-row">
+          <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+          <div class="toggle-text">
+            <label class="setting-label" for="autoPauseInput">Auto-pause for questions</label>
+            <p id="autoPauseHint" class="field-hint">Lamiss will pause the video when asking you</p>
+          </div>
+          <label class="switch">
+            <input id="autoPauseInput" type="checkbox" aria-describedby="autoPauseHint" />
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+
         <p class="footnote">Kindness, length and encouragement shape Lamiss's answers to your questions and its feedback on your answers.</p>
       </div>
     </div>
@@ -353,14 +366,32 @@
       </section>
 
       <section class="card profile-card">
-        <span class="avatar">
-          <img id="profileAvatar" alt="" referrerpolicy="no-referrer" hidden />
-          <span id="profileInitials" class="avatar-initials" aria-hidden="true"></span>
-        </span>
-        <div class="profile-text">
-          <p id="profileName" class="profile-name">Loading…</p>
-          <p id="profileEmail" class="profile-email"></p>
-        </div>
+        <button id="profileEditButton" class="profile-row" type="button" aria-expanded="false" aria-controls="usernameForm">
+          <span class="avatar">
+            <img id="profileAvatar" alt="" referrerpolicy="no-referrer" hidden />
+            <span id="profileInitials" class="avatar-initials" aria-hidden="true"></span>
+          </span>
+          <span class="profile-text">
+            <span id="profileName" class="profile-name">Loading…</span>
+            <span id="profileEmail" class="profile-email"></span>
+            <span id="profileUsername" class="profile-username"></span>
+          </span>
+          <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+        </button>
+        <form id="usernameForm" class="username-form" novalidate hidden>
+          <label class="setting-label" for="usernameInput">Username</label>
+          <div class="username-field">
+            <span class="username-at" aria-hidden="true">@</span>
+            <input id="usernameInput" class="text-input" type="text" autocomplete="username" spellcheck="false"
+              minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" aria-describedby="usernameMessage" />
+          </div>
+          <p id="usernameMessage" class="field-message" aria-live="polite"></p>
+          <p class="field-hint">3–20 letters, numbers or underscores. Your name and picture come from Google.</p>
+          <div class="username-actions">
+            <button id="usernameCancelButton" class="btn btn-soft btn-small" type="button">Cancel</button>
+            <button id="usernameSaveButton" class="btn btn-primary btn-small" type="submit">Save</button>
+          </div>
+        </form>
       </section>
 
       <div id="profileError" class="error-card" hidden>
@@ -379,7 +410,21 @@
         <select id="learningSelect" class="select"></select>
         <label class="setting-label" for="levelSelect">Proficiency level</label>
         <select id="levelSelect" class="select"></select>
-        <p class="field-hint">Learning goals and a daily goal are coming later.</p>
+        <label class="setting-label" for="goalSelect">Learning goal</label>
+        <select id="goalSelect" class="select"></select>
+        <div class="slider-row">
+          <label class="setting-label" for="dailyGoalInput">Daily goal <span class="optional">(optional)</span></label>
+          <output id="dailyGoalValue" class="slider-value" for="dailyGoalInput">Off</output>
+        </div>
+        <input id="dailyGoalInput" class="slider" type="range" min="0" max="240" step="5" value="0" aria-describedby="dailyGoalHint" />
+        <p id="dailyGoalHint" class="field-hint">Minutes of video you watch with Lamiss each day. Slide to the left for no goal.</p>
+        <div id="profileProgress" class="progress" hidden>
+          <div class="progress-row">
+            <span class="progress-label">Practice</span>
+            <span id="profileProgressText" class="progress-text"></span>
+          </div>
+          <span class="progress-bar" aria-hidden="true"><span id="profileProgressFill" class="progress-fill"></span></span>
+        </div>
       </section>
 
       <button id="signOutButton" class="btn btn-danger btn-block" type="button">

@@ -1,5 +1,5 @@
-// Tutor Behavior: kindness, response length, encouragement and explanation
-// language (the user's preferences on the backend), and how often Lamiss asks
+// Tutor Behavior: kindness, response length, encouragement, explanation
+// language and auto-pause (the user's preferences on the backend), and how often Lamiss asks
 // its own questions (lamissQuestionSettings, local; the worker sends it over
 // the live connection).
 
@@ -14,12 +14,23 @@ const tutorFrequency = document.querySelector<HTMLElement>('[data-segment="frequ
 const tutorResponseLength = document.querySelector<HTMLElement>('[data-segment="responseLength"]')!;
 const tutorEncouragementInput = popupElement<HTMLInputElement>('encouragementInput');
 const tutorExplanationSelect = popupElement<HTMLSelectElement>('explanationSelect');
+const tutorAutoPauseInput = popupElement<HTMLInputElement>('autoPauseInput');
+const tutorAutoPauseHint = popupElement<HTMLParagraphElement>('autoPauseHint');
+
+function renderTutorAutoPause(on: boolean): void {
+  tutorAutoPauseInput.checked = on;
+  tutorAutoPauseHint.textContent = on
+    ? 'Lamiss will pause the video when asking you'
+    : 'The video keeps playing, quieter, while Lamiss asks you';
+}
 
 function renderTutor(preferences: LamissPreferences): void {
   setSegmentValue(tutorKindness, preferences.tutor.kindness);
   setSegmentValue(tutorResponseLength, preferences.tutor.responseLength);
   tutorEncouragementInput.checked = preferences.tutor.encouragement;
   fillLanguageSelect(tutorExplanationSelect, 'Video\'s language', preferences.tutor.explanationLanguage);
+  // Not set (or an older backend) means on.
+  renderTutorAutoPause(preferences.tutor.autoPause !== false);
 }
 
 async function loadTutor(): Promise<void> {
@@ -80,6 +91,11 @@ onSegmentClick(tutorFrequency, async (value) => {
 
 tutorEncouragementInput.addEventListener('change', () => {
   void saveTutor({ encouragement: tutorEncouragementInput.checked });
+});
+
+tutorAutoPauseInput.addEventListener('change', () => {
+  renderTutorAutoPause(tutorAutoPauseInput.checked);
+  void saveTutor({ autoPause: tutorAutoPauseInput.checked });
 });
 
 tutorExplanationSelect.addEventListener('change', () => {

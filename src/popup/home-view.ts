@@ -1,5 +1,5 @@
-// Home: Start Learning, the category cards, the sign-in card when signed
-// out, and a status line built from real signals: the sign-in, whether the
+// Home: Start Learning, today's progress when a daily goal is set, the
+// category cards, the sign-in card when signed out, and a status line built from real signals: the sign-in, whether the
 // backend answers, whether the active tab is a YouTube video, and what the
 // in-page Lamiss button on it is doing.
 
@@ -12,6 +12,11 @@ const homeStartLabel = popupElement<HTMLSpanElement>('startLabel');
 const homeStartDetail = popupElement<HTMLSpanElement>('startDetail');
 const homeStatusDot = popupElement<HTMLSpanElement>('statusDot');
 const homeStatusText = popupElement<HTMLSpanElement>('statusText');
+const homeProgressParts = {
+  container: popupElement<HTMLDivElement>('homeProgress'),
+  text: popupElement<HTMLSpanElement>('homeProgressText'),
+  fill: popupElement<HTMLSpanElement>('homeProgressFill')
+};
 
 type HomeStatusTone = 'ready' | 'attention' | 'error' | 'busy';
 
@@ -111,6 +116,7 @@ async function refreshHomeStatus(): Promise<void> {
   };
 
   if (!popupSignedIn()) {
+    renderPracticeProgress(homeProgressParts, undefined);
     setHomeStatus('attention', popupAuthState.status === 'expired' ? 'Your session ended. Sign in again to continue.' : 'Sign in to start learning');
     return;
   }
@@ -128,6 +134,12 @@ async function refreshHomeStatus(): Promise<void> {
     blocked('error', profile.status === undefined ? 'Lamiss can\'t be reached right now' : `Lamiss isn't available: ${profile.error}`, 'Lamiss isn\'t reachable right now');
     return;
   }
+  // The daily goal line, alongside the tab checks; hidden when there is no goal.
+  void loadPopupPractice().then((practice) => {
+    if (current()) {
+      renderPracticeProgress(homeProgressParts, practice.ok ? practice.data : undefined);
+    }
+  });
   if (!video) {
     blocked('attention', 'Open a YouTube video to start learning', 'Open a YouTube video first');
     return;
