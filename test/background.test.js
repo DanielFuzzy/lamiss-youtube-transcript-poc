@@ -517,3 +517,56 @@ test('signing in again moves open live sockets to the new session', async () => 
   assert.equal(env.session.data.get('lamissAuth').accessToken, 'second-token');
   assert.equal(env.FakeWebSocket.instances.length, 2);
 });
+
+// TDR-0002 decision 9: with auto-pause off the backend sends no PAUSE_VIDEO,
+// so a question replayed after a reconnect must not pause the video either.
+test('a replayed question is paused only if it was paused when first asked', async () => {
+  const env = backgroundEnv({
+    extra: async (url) => {
+      if (url.endsWith('/api/learning-sessions')) {
+        return { json: { learningSessionId: 42, videoId: 1, videoExternalId: 'vid', resumed: true, aiKnowledgeReady: true } };
+      }
+      if (url.endsWith('/api/auth/ws-ticket')) {
+        return { json: { ticket: 't', expiresAt: futureIso(30_000) } };
+      }
+      return undefined;
+    }
+  });
+  signIn(env);
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'start', videoId: 'vid' });
+  await flush();
+  const socket = env.FakeWebSocket.instances[0];
+  socket.readyState = 1;
+  socket.emit('open');
+  await flush();
+
+  const serverTypes = () => port.messages.filter(message => message.type === 'server').map(message => message.message.type);
+
+  // Asked with auto-pause off: stored unpaused.
+  socket.emit('message', { data: JSON.stringify({ type: 'ASK_QUESTION', eventId: 'e1', question: 'Why?' }) });
+  await flush();
+  assert.deepEqual(plain(env.local.data.get('lamissPendingQuestion:42')), { eventId: 'e1', question: 'Why?', paused: false });
+  port.messages.length = 0;
+  socket.emit('open');
+  await flush();
+  assert.deepEqual(serverTypes(), ['ASK_QUESTION']);
+
+  // Asked with auto-pause on: PAUSE_VIDEO is replayed before it.
+  socket.emit('message', { data: JSON.stringify({ type: 'PAUSE_VIDEO' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'ASK_QUESTION', eventId: 'e2', question: 'How?' }) });
+  await flush();
+  assert.equal(env.local.data.get('lamissPendingQuestion:42').paused, true);
+  port.messages.length = 0;
+  socket.emit('open');
+  await flush();
+  assert.deepEqual(serverTypes(), ['PAUSE_VIDEO', 'ASK_QUESTION']);
+
+  // Stored before auto-pause could be turned off: paused, as before.
+  env.local.data.set('lamissPendingQuestion:42', { eventId: 'e3', question: 'What?' });
+  port.messages.length = 0;
+  socket.emit('open');
+  await flush();
+  assert.deepEqual(serverTypes(), ['PAUSE_VIDEO', 'ASK_QUESTION']);
+});

@@ -711,7 +711,9 @@ type LamissLiveWorkerMessage =
 // Lamiss's voice, played by the offscreen document.
 type LamissSpeechEvent = { type: 'started' } | { type: 'ended' } | { type: 'failed'; error: string };
 
-type LamissPendingQuestion = { eventId: string; question: string };
+// paused: whether PAUSE_VIDEO came before it (the user's auto-pause was on);
+// missing in records stored before auto-pause could be turned off.
+type LamissPendingQuestion = { eventId: string; question: string; paused?: boolean };
 
 type LamissLiveConnection = {
   port: chrome.runtime.Port;
@@ -728,6 +730,8 @@ type LamissLiveConnection = {
   accessToken?: string;
   // Bumped by every new connection attempt; an older attempt stops at its next step.
   generation: number;
+  // PAUSE_VIDEO came and its ASK_QUESTION hasn't yet.
+  pauseRequested?: boolean;
 };
 
 const liveConnections = new Set<LamissLiveConnection>();
@@ -877,6 +881,7 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
 
   socket.addEventListener('open', () => {
     live.attempt = 0;
+    live.pauseRequested = false;
     void sendQuestionSettings(socket);
     postLive(live, { type: 'status', state: 'connected' });
     if (live.connectedBefore) {
@@ -885,8 +890,11 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
     live.connectedBefore = true;
     void readPendingQuestion(learningSessionId).then((pending) => {
       if (pending && live.socket === socket) {
-        postLive(live, { type: 'server', message: { type: 'PAUSE_VIDEO' } });
-        postLive(live, { type: 'server', message: { type: 'ASK_QUESTION', ...pending } });
+        // Replayed as it first came: paused only if auto-pause paused it then.
+        if (pending.paused !== false) {
+          postLive(live, { type: 'server', message: { type: 'PAUSE_VIDEO' } });
+        }
+        postLive(live, { type: 'server', message: { type: 'ASK_QUESTION', eventId: pending.eventId, question: pending.question } });
       }
     });
   });
@@ -900,8 +908,12 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
       return;
     }
 
-    if (message.type === 'ASK_QUESTION') {
-      void chrome.storage.local.set({ [pendingQuestionKey(learningSessionId)]: { eventId: message.eventId, question: message.question } });
+    if (message.type === 'PAUSE_VIDEO') {
+      live.pauseRequested = true;
+    } else if (message.type === 'ASK_QUESTION') {
+      const paused = live.pauseRequested === true;
+      live.pauseRequested = false;
+      void chrome.storage.local.set({ [pendingQuestionKey(learningSessionId)]: { eventId: message.eventId, question: message.question, paused } });
       postLiveLog(live, { type: 'lamiss-asked', question: message.question });
     } else if (message.type === 'FEEDBACK') {
       // Feedback means the backend has stored the answer.
