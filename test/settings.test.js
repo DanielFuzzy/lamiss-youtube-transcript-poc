@@ -226,6 +226,22 @@ test('practice today: GET with the local IANA time zone, encoded', async () => {
   assert.equal(env.run('lamissLocalTimeZone()'), zone);
 });
 
+test('practice today: a zone the backend rejects falls back to UTC once', async () => {
+  const today = { date: '2026-10-20', practicedMinutes: 3, goalMinutes: 30 };
+  const env = pageEnv(async (url) => new URL(url).searchParams.get('timeZone') === 'UTC'
+    ? { json: today }
+    : { status: 400, json: { detail: 'Invalid time zone', errorCode: 'invalid_time_zone' } });
+  assert.deepEqual(plain(await env.run("fetchPracticeToday('Etc/Unknown')")), { ok: true, data: today });
+  assert.deepEqual(env.fetchCalls.map(call => new URL(call.url).searchParams.get('timeZone')), ['Etc/Unknown', 'UTC']);
+
+  // Other failures are reported as they are, without a second request.
+  const failing = pageEnv(async () => ({ status: 503, json: { detail: 'down', retryable: true } }));
+  const result = plain(await failing.run("fetchPracticeToday('Europe/Madrid')"));
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 503);
+  assert.equal(failing.fetchCalls.length, 1);
+});
+
 test('practice progress: "12 of 30 min today", nothing without a goal', () => {
   const env = pageEnv();
   assert.deepEqual(plain(env.run("describePracticeProgress({ date: '2026-10-20', practicedMinutes: 12, goalMinutes: 30 })")),

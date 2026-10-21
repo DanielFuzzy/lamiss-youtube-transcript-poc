@@ -587,10 +587,17 @@ function lamissLocalTimeZone(): string {
   }
 }
 
-function fetchPracticeToday(timeZone: string = lamissLocalTimeZone()): Promise<LamissCallResult<LamissPracticeToday>> {
-  return callLamiss<LamissPracticeToday>(`/api/me/practice/today?timeZone=${encodeURIComponent(timeZone)}`, {
+// A zone the backend doesn't know (e.g. ICU's "Etc/Unknown" when the system
+// zone can't be detected) falls back to UTC rather than hiding the progress.
+async function fetchPracticeToday(timeZone: string = lamissLocalTimeZone()): Promise<LamissCallResult<LamissPracticeToday>> {
+  const ask = (zone: string) => callLamiss<LamissPracticeToday>(`/api/me/practice/today?timeZone=${encodeURIComponent(zone)}`, {
     headers: { accept: 'application/json' }
   });
+  const result = await ask(timeZone);
+  if (!result.ok && result.errorCode === 'invalid_time_zone' && timeZone !== 'UTC') {
+    return ask('UTC');
+  }
+  return result;
 }
 
 // "12 of 30 min today" and how far along the bar is (0–1), or undefined when
