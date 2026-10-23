@@ -19,6 +19,12 @@ const root = path.resolve(__dirname, '..');
 const extensionDir = path.join(root, 'compiled');
 const screenshotDir = path.resolve(process.argv[2] || path.join(root, 'e2e-screenshots'));
 const VIDEO_URL = 'https://www.youtube.com/watch?v=LeRylkDym54';
+// The watch page stand-in: a Subscribe button for the content script to put
+// its button next to, and page-wide img rules like a site's to check the logo
+// keeps its own size.
+const YOUTUBE_STUB = '<!doctype html><title>Video - YouTube</title>'
+  + '<style>img { width: auto; height: auto; max-width: 100%; vertical-align: middle; }</style>'
+  + '<video></video><ytd-watch-metadata><div id="owner"><div id="subscribe-button">Subscribe</div></div></ytd-watch-metadata>';
 
 function fail(message) {
   console.error(`popup-e2e: ${message}`);
@@ -193,7 +199,7 @@ async function main() {
     await context.route(`${apiBase}/**`, route => answerBackend(route, apiBase));
     // A stand-in YouTube watch page: the real content script runs on it.
     await context.route('https://www.youtube.com/**', route => route.request().resourceType() === 'document'
-      ? route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Video - YouTube</title><video></video>' })
+      ? route.fulfill({ status: 200, contentType: 'text/html', body: YOUTUBE_STUB })
       : route.abort());
 
     let worker = context.serviceWorkers()[0];
@@ -203,6 +209,54 @@ async function main() {
 
     const youtube = await context.newPage();
     await youtube.goto(VIDEO_URL);
+
+    // The in-page button's logo comes from the extension (web_accessible_resources).
+    const pageLogo = youtube.locator('#lamiss-start-button .lamiss-start-button__logo img');
+    await pageLogo.waitFor({ timeout: 10000 });
+    await pageLogo.evaluate(img => img.decode().catch(() => {}));
+    const logoInfo = await pageLogo.evaluate((img) => {
+      const box = img.getBoundingClientRect();
+      return { loaded: img.complete && img.naturalWidth > 0, width: box.width, height: box.height, alt: img.alt };
+    });
+    check(logoInfo.loaded, 'youtube: the button logo loads from the extension');
+    check(logoInfo.width === 20 && logoInfo.height === 20, `youtube: the logo keeps 20x20 under the page's img rules (${logoInfo.width}x${logoInfo.height})`);
+    check(logoInfo.alt === '', 'youtube: the logo is decorative (alt="")');
+    // Copies of the button in the states the content script reaches later: the
+    // loading pulse and the badge with its status dot.
+    const states = await youtube.evaluate(async () => {
+      const original = document.getElementById('lamiss-start-button');
+      const row = document.createElement('div');
+      row.id = 'lamiss-e2e-states';
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:#0f0f0f';
+      const copy = (attributes) => {
+        const button = original.cloneNode(true);
+        button.removeAttribute('id');
+        Object.entries(attributes).forEach(([name, value]) => button.setAttribute(name, value));
+        row.append(button);
+        return button;
+      };
+      const plain = copy({});
+      const loading = copy({ 'data-state': 'loading' });
+      const badge = copy({ 'data-state': 'ready', 'data-badge': 'monitoring' });
+      document.body.append(row);
+      await Promise.all([...row.querySelectorAll('img')].map(img => img.decode().catch(() => {})));
+      const logoOf = button => button.querySelector('.lamiss-start-button__logo');
+      const dot = badge.querySelector('.lamiss-start-button__dot');
+      const dotBox = dot.getBoundingClientRect();
+      const logoBox = logoOf(badge).getBoundingClientRect();
+      return {
+        plainAnimation: getComputedStyle(logoOf(plain)).animationName,
+        loadingAnimation: getComputedStyle(logoOf(loading)).animationName,
+        dotShown: getComputedStyle(dot).display !== 'none' && dotBox.width > 0,
+        dotOnLogo: dotBox.right > logoBox.left + logoBox.width / 2 && dotBox.bottom > logoBox.top + logoBox.height / 2
+      };
+    });
+    check(states.loadingAnimation === 'lamiss-start-button-pulse' && states.plainAnimation === 'none', `youtube: the logo pulses while loading (${states.loadingAnimation})`);
+    check(states.dotShown && states.dotOnLogo, 'youtube: the badge shows its status dot on the logo');
+    const pageShot = path.join(screenshotDir, '00-youtube-button.png');
+    await youtube.locator('#lamiss-e2e-states').screenshot({ path: pageShot });
+    console.log(`     screenshot ${pageShot}`);
+    await youtube.evaluate(() => document.getElementById('lamiss-e2e-states').remove());
 
     const popup = await context.newPage();
     popup.on('console', (message) => {
