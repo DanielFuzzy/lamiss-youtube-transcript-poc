@@ -171,15 +171,15 @@ svg.filled {
   text-align: center;
 }
 
+/* The logo is a character on a transparent background, so it gets no tile. */
 .hero-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  box-shadow: 0 8px 22px rgba(124, 58, 237, 0.28);
+  width: 68px;
+  height: 68px;
+  filter: drop-shadow(0 6px 12px rgba(66, 29, 144, 0.22));
 }
 
 .hero-title {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 19px;
   font-weight: 800;
   letter-spacing: 1.5px;

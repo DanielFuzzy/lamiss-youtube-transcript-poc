@@ -33,6 +33,8 @@ const staticFiles = [
   ['src/chat/chat.html', 'chat/chat.html'],
   ['src/offscreen/offscreen.html', 'offscreen/offscreen.html'],
   ['src/content/lamiss-button.css', 'content/lamiss-button.css'],
+  ['src/brand/lamiss-logo.svg', 'brand/lamiss-logo.svg'],
+  ['src/brand/lamiss-mark-small.svg', 'brand/lamiss-mark-small.svg'],
   ['src/icons/icon-16.png', 'icons/icon-16.png'],
   ['src/icons/icon-32.png', 'icons/icon-32.png'],
   ['src/icons/icon-48.png', 'icons/icon-48.png'],
