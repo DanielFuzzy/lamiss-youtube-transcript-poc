@@ -35,7 +35,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "chat/chat.html"
+        "chat/chat.html",
+        "brand/lamiss-mark-small.svg"
       ],
       "matches": [
         "https://www.youtube.com/*"
