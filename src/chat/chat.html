@@ -54,6 +54,7 @@
       border-bottom: 1px solid var(--border);
     }
 
+    /* The logo's face is its background, so on this dark panel it sits on a white tile. */
     .logo {
       display: grid;
       place-items: center;
@@ -61,11 +62,13 @@
       width: 32px;
       height: 32px;
       border-radius: 10px;
-      font-size: 16px;
-      font-weight: 800;
-      color: white;
-      background: linear-gradient(135deg, var(--accent) 0%, var(--pink) 100%);
+      background: #ffffff;
       box-shadow: 0 4px 14px rgba(139, 92, 246, 0.45);
+    }
+
+    .logo img {
+      width: 27px;
+      height: 27px;
     }
 
     .title {
@@ -453,7 +456,7 @@
 </head>
 <body>
   <header>
-    <div class="logo" aria-hidden="true">L</div>
+    <div class="logo" aria-hidden="true"><img src="../brand/lamiss-mark-small.svg" alt="" /></div>
     <div class="title">
       <h1>Lamiss</h1>
       <p id="sessionStatus" aria-live="polite">Starting your session…</p>

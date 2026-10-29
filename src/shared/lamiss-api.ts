@@ -108,12 +108,71 @@ function saveQuestionSettings(settings: LamissQuestionSettings): Promise<void> {
   return chrome.storage.local.set({ [LAMISS_QUESTION_SETTINGS_KEY]: settings });
 }
 
+// The microphone and speaker this browser profile uses for Lamiss, and its
+// voice volume (0–1). Device IDs belong to this machine and profile, so they
+// stay in extension storage and never go to the backend (TDR-0002).
+type LamissDeviceSettings = {
+  micDeviceId?: string;
+  speakerDeviceId?: string;
+  volume: number;
+};
+
+const LAMISS_DEVICE_SETTINGS_KEY = 'lamissDeviceSettings';
+
+const LAMISS_DEFAULT_DEVICE_SETTINGS: LamissDeviceSettings = { volume: 1 };
+
+function clampVolume(volume: unknown): number {
+  return typeof volume === 'number' && Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1;
+}
+
+async function readDeviceSettings(): Promise<LamissDeviceSettings> {
+  try {
+    const stored = await chrome.storage.local.get(LAMISS_DEVICE_SETTINGS_KEY);
+    const value = stored[LAMISS_DEVICE_SETTINGS_KEY] as Partial<LamissDeviceSettings> | undefined;
+    return {
+      ...(typeof value?.micDeviceId === 'string' && value.micDeviceId ? { micDeviceId: value.micDeviceId } : {}),
+      ...(typeof value?.speakerDeviceId === 'string' && value.speakerDeviceId ? { speakerDeviceId: value.speakerDeviceId } : {}),
+      volume: clampVolume(value?.volume ?? LAMISS_DEFAULT_DEVICE_SETTINGS.volume)
+    };
+  } catch {
+    return { ...LAMISS_DEFAULT_DEVICE_SETTINGS };
+  }
+}
+
+// Merges the change into what is stored. An empty device ID means "default".
+async function saveDeviceSettings(change: Partial<LamissDeviceSettings>): Promise<LamissDeviceSettings> {
+  const merged: LamissDeviceSettings = { ...(await readDeviceSettings()), ...change };
+  const next: LamissDeviceSettings = {
+    ...(merged.micDeviceId ? { micDeviceId: merged.micDeviceId } : {}),
+    ...(merged.speakerDeviceId ? { speakerDeviceId: merged.speakerDeviceId } : {}),
+    volume: clampVolume(merged.volume)
+  };
+  await chrome.storage.local.set({ [LAMISS_DEVICE_SETTINGS_KEY]: next });
+  return next;
+}
+
+// --- Popup ↔ content script (TDR-0002) -------------------------------------------
+
+// Popup → the active YouTube tab: same as clicking the in-page Lamiss button.
+const LAMISS_START_LEARNING_MESSAGE = 'lamiss:start-learning';
+// Popup → the active YouTube tab: replies { videoId, buttonState }.
+const LAMISS_PAGE_STATUS_MESSAGE = 'lamiss:page-status';
+
+type LamissPageStatus = { videoId: string | null; buttonState: string };
+
+// A page of this extension (popup, chat, offscreen) or its worker, never a
+// content script: those share the extension ID but run in a tab.
+function isFromExtensionPage(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && !sender.tab
+    && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
+}
+
 const LAMISS_UNREACHABLE_MESSAGE = `Could not reach Lamiss at ${LAMISS_API_BASE_URL}. Check your connection and try again.`;
 
 // signInRequired: the backend answered 401, so only signing in again helps.
 type LamissCallResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status?: number; error: string; retryable: boolean; signInRequired?: boolean };
+  | { ok: false; status?: number; error: string; retryable: boolean; signInRequired?: boolean; errorCode?: string };
 
 type LamissCallOptions = {
   // The public sign-in endpoints: no token is sent, and a 401 is an ordinary error.
@@ -188,7 +247,9 @@ async function callLamiss<T>(path: string, init: RequestInit, options: LamissCal
         ok: false,
         status: response.status,
         error: problem?.detail ?? `HTTP ${response.status}`,
-        retryable: problem?.retryable ?? response.status >= 500
+        retryable: problem?.retryable ?? response.status >= 500,
+        // TDR-0001: the machine-readable reason, when the backend gives one.
+        ...(typeof problem?.errorCode === 'string' ? { errorCode: problem.errorCode } : {})
       };
     }
     return { ok: true, data: await response.json() as T };
@@ -301,6 +362,12 @@ async function synthesizeSpeech(text: string, language?: string, accessToken?: s
   }
 }
 
+// The language to read a text in: the one the backend reported for it (an
+// ISO 639-1 code, e.g. FEEDBACK's language), else the fallback (the video's).
+function lamissSpeechLanguage(reported: unknown, fallback: string | undefined): string | undefined {
+  return typeof reported === 'string' && /^[a-z]{2}$/.test(reported) ? reported : fallback;
+}
+
 async function readVideoPositionMs(tabId: number): Promise<number> {
   try {
     const [result] = await chrome.scripting.executeScript({
@@ -331,9 +398,41 @@ function pickRecordingMimeType(): string {
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) ?? '';
 }
 
+// The microphone the user picked in the popup, or the default one when none
+// was picked or it is gone (unplugged, or a new browser profile).
+async function getMicrophoneStream(deviceId: string | undefined, audio: MediaTrackConstraints = {}): Promise<MediaStream> {
+  if (!deviceId) {
+    return navigator.mediaDevices.getUserMedia({ audio: Object.keys(audio).length > 0 ? audio : true });
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: { ...audio, deviceId: { exact: deviceId } } });
+  } catch (error) {
+    const name = error instanceof DOMException ? error.name : (error as { name?: string } | null)?.name;
+    if (name !== 'OverconstrainedError' && name !== 'NotFoundError') {
+      throw error;
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: Object.keys(audio).length > 0 ? audio : true });
+  }
+}
+
+// Plays on the speaker the user picked, falling back to the default one.
+async function routeAudioToSpeaker(audio: HTMLMediaElement, speakerDeviceId: string | undefined): Promise<void> {
+  const element = audio as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
+  if (!speakerDeviceId || typeof element.setSinkId !== 'function') {
+    return;
+  }
+  try {
+    await element.setSinkId(speakerDeviceId);
+  } catch (error) {
+    console.warn('Lamiss POC: chosen speaker unavailable, using the default one:', error);
+    await element.setSinkId('').catch(() => undefined);
+  }
+}
+
 async function openMicrophone(): Promise<MediaStream | null> {
   try {
-    return await navigator.mediaDevices.getUserMedia({ audio: true });
+    const { micDeviceId } = await readDeviceSettings();
+    return await getMicrophoneStream(micDeviceId);
   } catch (error) {
     const name = error instanceof DOMException ? error.name : '';
     if (name === 'NotAllowedError' || name === 'SecurityError') {
@@ -345,4 +444,229 @@ async function openMicrophone(): Promise<MediaStream | null> {
     }
     throw error;
   }
+}
+
+// --- Settings (TDR-0002) ---------------------------------------------------------
+
+// The languages the backend knows (its Language enum), as ISO 639-1 codes.
+const LAMISS_LANGUAGES: ReadonlyArray<{ code: string; name: string }> = [
+  { code: 'en', name: 'English' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'fr', name: 'French' },
+  { code: 'de', name: 'German' },
+  { code: 'it', name: 'Italian' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'zh', name: 'Chinese' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'bn', name: 'Bengali' },
+  { code: 'ur', name: 'Urdu' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'te', name: 'Telugu' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'uk', name: 'Ukrainian' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'cs', name: 'Czech' },
+  { code: 'tr', name: 'Turkish' },
+  { code: 'el', name: 'Greek' },
+  { code: 'nl', name: 'Dutch' },
+  { code: 'sv', name: 'Swedish' },
+  { code: 'no', name: 'Norwegian' },
+  { code: 'da', name: 'Danish' },
+  { code: 'fi', name: 'Finnish' },
+  { code: 'he', name: 'Hebrew' },
+  { code: 'vi', name: 'Vietnamese' },
+  { code: 'th', name: 'Thai' },
+  { code: 'id', name: 'Indonesian' }
+];
+
+function lamissLanguageName(code: string | null | undefined): string {
+  return LAMISS_LANGUAGES.find(language => language.code === code)?.name ?? (code ?? '');
+}
+
+type LamissProficiencyLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+type LamissKindness = 'GENTLE' | 'BALANCED' | 'STRICT';
+type LamissResponseLength = 'SHORT' | 'NORMAL' | 'DETAILED';
+type LamissLearningGoal = 'CONVERSATION' | 'VOCABULARY' | 'GRAMMAR' | 'LISTENING' | 'PRONUNCIATION';
+
+// The fields added by the TDR-0002 addendum are optional here: an older
+// backend leaves them out, and a PUT without them means "not set".
+type LamissPreferences = {
+  nativeLanguage: string | null;
+  learningLanguage: string | null;
+  proficiencyLevel: LamissProficiencyLevel | null;
+  // null: no goal.
+  learningGoal?: LamissLearningGoal | null;
+  // 5–240, or null: no daily goal.
+  dailyGoalMinutes?: number | null;
+  tutor: {
+    kindness: LamissKindness;
+    responseLength: LamissResponseLength;
+    encouragement: boolean;
+    // null: the video's language.
+    explanationLanguage: string | null;
+    // Pause the video while Lamiss asks (the backend reads back true when not set).
+    autoPause?: boolean;
+  };
+  voice: {
+    // null: each language's default voice.
+    voiceId: string | null;
+    speed: number;
+  };
+};
+
+// language null: the voice speaks every language (the OpenAI provider).
+type LamissVoice = { id: string; label: string; language: string | null; default: boolean };
+
+type LamissVoiceList = {
+  provider: string;
+  selectable: boolean;
+  defaultSpeed: number;
+  voices: LamissVoice[];
+};
+
+// GET /api/auth/me
+type LamissProfile = LamissAuthUser & { displayName: string | null; pictureUrl: string | null };
+
+function fetchPreferences(): Promise<LamissCallResult<LamissPreferences>> {
+  return callLamiss<LamissPreferences>('/api/me/preferences', { headers: { accept: 'application/json' } });
+}
+
+// Always the full object; the backend answers with what it saved.
+function savePreferences(preferences: LamissPreferences): Promise<LamissCallResult<LamissPreferences>> {
+  return callLamiss<LamissPreferences>('/api/me/preferences', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(preferences)
+  });
+}
+
+function fetchVoices(): Promise<LamissCallResult<LamissVoiceList>> {
+  return callLamiss<LamissVoiceList>('/api/speech/voices', { headers: { accept: 'application/json' } });
+}
+
+function fetchProfile(): Promise<LamissCallResult<LamissProfile>> {
+  return callLamiss<LamissProfile>('/api/auth/me', { headers: { accept: 'application/json' } });
+}
+
+// --- Goals and profile editing (TDR-0002 addendum) ----------------------------------
+
+const LAMISS_LEARNING_GOALS: ReadonlyArray<{ goal: LamissLearningGoal; label: string }> = [
+  { goal: 'CONVERSATION', label: 'Conversation' },
+  { goal: 'VOCABULARY', label: 'Vocabulary' },
+  { goal: 'GRAMMAR', label: 'Grammar' },
+  { goal: 'LISTENING', label: 'Listening' },
+  { goal: 'PRONUNCIATION', label: 'Pronunciation' }
+];
+
+const LAMISS_DAILY_GOAL_MIN_MINUTES = 5;
+const LAMISS_DAILY_GOAL_MAX_MINUTES = 240;
+
+// The daily-goal slider: 0 is "Off", then 5–240 minutes.
+function dailyGoalFromSlider(value: number): number | null {
+  if (!Number.isFinite(value) || value < LAMISS_DAILY_GOAL_MIN_MINUTES) {
+    return null;
+  }
+  return Math.min(LAMISS_DAILY_GOAL_MAX_MINUTES, Math.round(value));
+}
+
+function formatDailyGoal(minutes: number | null | undefined): string {
+  return minutes ? `${minutes} min` : 'Off';
+}
+
+type LamissPracticeToday = { date: string; practicedMinutes: number; goalMinutes: number | null };
+
+// The browser's IANA time zone, which decides where "today" starts.
+function lamissLocalTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+// A zone the backend doesn't know (e.g. ICU's "Etc/Unknown" when the system
+// zone can't be detected) falls back to UTC rather than hiding the progress.
+async function fetchPracticeToday(timeZone: string = lamissLocalTimeZone()): Promise<LamissCallResult<LamissPracticeToday>> {
+  const ask = (zone: string) => callLamiss<LamissPracticeToday>(`/api/me/practice/today?timeZone=${encodeURIComponent(zone)}`, {
+    headers: { accept: 'application/json' }
+  });
+  const result = await ask(timeZone);
+  if (!result.ok && result.errorCode === 'invalid_time_zone' && timeZone !== 'UTC') {
+    return ask('UTC');
+  }
+  return result;
+}
+
+// "12 of 30 min today" and how far along the bar is (0–1), or undefined when
+// there is no daily goal.
+function describePracticeProgress(practice: LamissPracticeToday | undefined): { text: string; fraction: number; done: boolean } | undefined {
+  const goal = practice?.goalMinutes;
+  if (!practice || !goal || goal <= 0) {
+    return undefined;
+  }
+  const practiced = Math.max(0, Math.floor(practice.practicedMinutes || 0));
+  return {
+    text: `${practiced} of ${goal} min today`,
+    fraction: Math.min(1, practiced / goal),
+    done: practiced >= goal
+  };
+}
+
+// Same rules as the backend's domain.Username (TDR-0002 decision 12).
+const LAMISS_USERNAME_PATTERN = /^[A-Za-z0-9_]{3,20}$/;
+const LAMISS_USERNAME_RULES = 'Use 3–20 letters, numbers or underscores.';
+
+// Why a username can't be saved, or undefined when it can.
+function usernameProblem(username: string): string | undefined {
+  return LAMISS_USERNAME_PATTERN.test(username) ? undefined : LAMISS_USERNAME_RULES;
+}
+
+function updateUsername(username: string): Promise<LamissCallResult<LamissProfile>> {
+  return callLamiss<LamissProfile>('/api/me/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ username })
+  });
+}
+
+// A friendly message for a failed username change.
+function describeUsernameFailure(result: { ok: false; status?: number; error: string; errorCode?: string }): string {
+  if (result.status === 409 || result.errorCode === 'username_taken') {
+    return 'That username is already taken. Try another one.';
+  }
+  if (result.errorCode === 'invalid_username') {
+    return LAMISS_USERNAME_RULES;
+  }
+  return result.error;
+}
+
+// The voices to offer for a learning language: that language's, or all of
+// them (grouped by language by the caller) when none is set.
+function voicesForLanguage(voices: LamissVoice[], language: string | null): LamissVoice[] {
+  return language ? voices.filter(voice => voice.language === language) : voices;
+}
+
+// Whether the server has a voice for the language: a voice of that language,
+// or one that speaks every language. Without one the backend reads the text
+// with its fallback voice, which speaks another language.
+function lamissHasVoiceFor(list: LamissVoiceList | undefined, language: string): boolean {
+  return Boolean(list?.voices.some(voice => voice.language === null || voice.language === language));
+}
+
+// The question-frequency choices of the popup, as the existing gap setting.
+const LAMISS_QUESTION_FREQUENCIES = [
+  { key: 'LESS', seconds: 300 },
+  { key: 'NORMAL', seconds: 120 },
+  { key: 'MORE', seconds: 60 }
+] as const;
+
+type LamissQuestionFrequency = typeof LAMISS_QUESTION_FREQUENCIES[number]['key'];
+
+// The choice closest to a stored gap (the chat panel's slider has more stops).
+function questionFrequencyFor(seconds: number): LamissQuestionFrequency {
+  return LAMISS_QUESTION_FREQUENCIES.reduce((best, choice) =>
+    Math.abs(choice.seconds - seconds) < Math.abs(best.seconds - seconds) ? choice : best).key;
 }

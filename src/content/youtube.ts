@@ -51,7 +51,8 @@ function fetchCaptionResourceInMainWorld(tabId: number, captionUrl: string): Pro
 
 type TranscriptLoadResponse = CaptionFetchResult | { success: boolean; error: string };
 
-// Shared by the popup's LOAD_TRANSCRIPT message and the in-page Lamiss button.
+// Shared by the LOAD_TRANSCRIPT message (no longer sent by the popup; kept for
+// the debug scripts) and the in-page Lamiss button.
 // `respond` is called exactly once, by whichever step finishes the load.
 function startTranscriptLoad(tabId: number, respond: (response: TranscriptLoadResponse) => void): void {
   const parsed = parseYouTubeWatchUrl(window.location.href);
@@ -401,6 +402,16 @@ let lamissAuthStatus: LamissAuthState['status'] | undefined;
 // brings it back without loading the transcript again.
 let lamissResumeAfterSignIn: { videoId: string; language?: string } | undefined;
 
+// The small logo, listed in the manifest's web_accessible_resources so this page may load it.
+function createLamissLogoImage(): HTMLImageElement {
+  const image = document.createElement('img');
+  image.src = chrome.runtime.getURL('brand/lamiss-mark-small.svg');
+  image.alt = '';
+  image.width = 20;
+  image.height = 20;
+  return image;
+}
+
 function createLamissButton(): HTMLButtonElement {
   const button = document.createElement('button');
   button.id = LAMISS_PAGE_BUTTON_ID;
@@ -409,7 +420,7 @@ function createLamissButton(): HTMLButtonElement {
 
   const logo = document.createElement('span');
   logo.className = 'lamiss-start-button__logo';
-  logo.textContent = 'L';
+  logo.append(createLamissLogoImage());
   // Status dot, shown once the button shrinks to a badge (see lamissBadgeState).
   const dot = document.createElement('span');
   dot.className = 'lamiss-start-button__dot';
@@ -681,6 +692,29 @@ chrome.runtime.onMessage.addListener((message: { type?: string; state?: { status
   return false;
 });
 
+// The toolbar popup's Start Learning button and status line. Only pages of
+// this extension may send these: never another extension, nor a content script.
+chrome.runtime.onMessage.addListener((message: { type?: string } | undefined, sender, sendResponse) => {
+  if ((message?.type !== LAMISS_START_LEARNING_MESSAGE && message?.type !== LAMISS_PAGE_STATUS_MESSAGE) || !isFromExtensionPage(sender)) {
+    return false;
+  }
+  const parsed = parseYouTubeWatchUrl(window.location.href);
+  const videoId = parsed.success && parsed.videoId ? parsed.videoId : null;
+  if (message.type === LAMISS_START_LEARNING_MESSAGE && videoId) {
+    // Picks up an in-app navigation the button hasn't seen yet.
+    ensureLamissButton();
+    if (lamissButtonState === 'ready') {
+      setLamissChatOpen(true);
+    } else {
+      // Runs in the background; the popup only waits for the state it starts.
+      void onLamissButtonClick();
+    }
+  }
+  const status: LamissPageStatus = { videoId, buttonState: lamissButtonState };
+  sendResponse(status);
+  return false;
+});
+
 void chrome.runtime.sendMessage({ type: LAMISS_AUTH_STATE_MESSAGE })
   .then((state?: { status?: unknown }) => {
     const status = state?.status;
@@ -775,6 +809,11 @@ const LAMISS_QUESTION_ID = 'lamiss-question';
 const LAMISS_TOAST_ID = 'lamiss-toast';
 // Pause between the end of the spoken feedback and the video resuming.
 const LAMISS_RESUME_AFTER_SPEECH_MS = 1200;
+// With auto-pause off (TDR-0002 decision 9) the video keeps playing under the
+// question: its volume goes down to this while Lamiss speaks or listens, and
+// the card closes by itself this long after the feedback was read.
+const LAMISS_DUCKED_VOLUME = 0.2;
+const LAMISS_CLOSE_AFTER_FEEDBACK_MS = 4000;
 
 type LamissQuestionPhase =
   | 'speaking'      // Lamiss reads the question aloud
@@ -797,6 +836,9 @@ type LamissQuestionState = {
   listenDeadline?: number;
   resumeRequested?: boolean;
   speakingFeedback?: boolean;
+  // PAUSE_VIDEO came for this question: the video stays paused until it is
+  // answered. Without it (auto-pause off) the video plays on, quieter.
+  holdPaused: boolean;
   error?: string;
 };
 
@@ -810,6 +852,11 @@ let lamissQuestion: LamissQuestionState | null = null;
 let lamissResumeTimer: number | undefined;
 let lamissCountdownTimer: number | undefined;
 let lamissToastTimer: number | undefined;
+// PAUSE_VIDEO arrived and the question it announces hasn't yet.
+let lamissPauseRequested = false;
+// The video's volume while it is lowered for Lamiss: the user's own volume
+// to put back, and the one set, to tell whether the user changed it since.
+let lamissDucking: { video: HTMLVideoElement; userVolume: number; duckedVolume: number } | null = null;
 
 function getLamissPlayer(): HTMLElement | null {
   return document.getElementById('movie_player');
@@ -843,6 +890,7 @@ function stopLamissLive(): void {
   }
   hideLamissQuestion();
   stopLamissTimer();
+  lamissPauseRequested = false;
   lamissLiveVideoId = undefined;
   lamissMonitoringStarted = false;
   lamissLastErrorAt = 0;
@@ -897,6 +945,8 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
     lamissLiveState = message.state;
     if (message.state !== 'connected') {
       lamissNextQuestion = undefined;
+      // A reconnect announces its replayed question again.
+      lamissPauseRequested = false;
     } else {
       // Lamiss only hears positions from a playing video; tell it where a
       // paused one is so the countdown can start straight away.
@@ -937,13 +987,15 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
   const server = message.message;
   switch (server.type) {
     case 'PAUSE_VIDEO':
+      // Only sent when the user's auto-pause is on; it announces the next ASK_QUESTION.
+      lamissPauseRequested = true;
       getLamissVideo()?.pause();
       break;
     case 'ASK_QUESTION':
       showLamissQuestion(server.eventId, server.question);
       break;
     case 'FEEDBACK':
-      showLamissFeedback(server.correct, server.feedback);
+      showLamissFeedback(server.correct, server.feedback, server.language);
       break;
     case 'RESUME_VIDEO':
       onLamissResume();
@@ -967,9 +1019,10 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
 // Heartbeats come from the player's own timeupdate events, so a paused video
 // sends none. Media events don't bubble; listening in the capture phase on the
 // document survives YouTube swapping the <video> element.
+// A question that lets the video play on (auto-pause off) keeps reporting it.
 document.addEventListener('timeupdate', (event) => {
   const video = event.target;
-  if (!lamissLivePort || lamissQuestion || !(video instanceof HTMLVideoElement)) {
+  if (!lamissLivePort || lamissQuestion?.holdPaused || !(video instanceof HTMLVideoElement)) {
     return;
   }
   const player = getLamissPlayer();
@@ -1013,24 +1066,75 @@ for (const type of ['seeking', 'seeked']) {
 }
 
 // Keep the video paused until the question is answered, even if the user
-// presses play with the keyboard or another control.
+// presses play with the keyboard or another control, when Lamiss paused it.
 document.addEventListener('play', (event) => {
-  if (lamissQuestion && lamissQuestion.phase !== 'feedback' && event.target === getLamissVideo()) {
+  if (lamissQuestion?.holdPaused && lamissQuestion.phase !== 'feedback' && event.target === getLamissVideo()) {
     getLamissVideo()?.pause();
   }
 }, true);
+
+// The user moved the volume (or muted) while it was lowered: theirs wins,
+// and nothing is put back afterwards.
+document.addEventListener('volumechange', (event) => {
+  const ducking = lamissDucking;
+  if (ducking && event.target === ducking.video && Math.abs(ducking.video.volume - ducking.duckedVolume) > 0.005) {
+    lamissDucking = null;
+  }
+}, true);
+
+// --- Ducking -------------------------------------------------------------------
+
+// Whether the playing video should be quieter now: a question that didn't
+// pause it is being asked, listened to, checked or answered aloud.
+function lamissShouldDuck(question: LamissQuestionState | null): boolean {
+  if (!question || question.holdPaused) {
+    return false;
+  }
+  return ['speaking', 'listening', 'recording', 'transcribing', 'sending'].includes(question.phase)
+    || (question.phase === 'feedback' && question.speakingFeedback === true);
+}
+
+function duckLamissVideo(): void {
+  const video = getLamissVideo();
+  if (!video || lamissDucking?.video === video) {
+    return;
+  }
+  restoreLamissVolume();
+  const userVolume = video.volume;
+  const duckedVolume = Math.min(userVolume, LAMISS_DUCKED_VOLUME);
+  lamissDucking = { video, userVolume, duckedVolume };
+  video.volume = duckedVolume;
+}
+
+// Puts the user's volume back, unless they changed it in the meantime.
+function restoreLamissVolume(): void {
+  const ducking = lamissDucking;
+  lamissDucking = null;
+  if (ducking && Math.abs(ducking.video.volume - ducking.duckedVolume) <= 0.005) {
+    ducking.video.volume = ducking.userVolume;
+  }
+}
+
+function updateLamissDucking(): void {
+  if (lamissShouldDuck(lamissQuestion)) {
+    duckLamissVideo();
+  } else {
+    restoreLamissVolume();
+  }
+}
 
 // --- Speech ------------------------------------------------------------------
 
 // Lamiss speaks with her own voice, a kind teacher synthesized by the backend
 // and played by the extension. If that fails (backend down, no audio), the
 // browser's built-in voice reads the text instead. Resolves when she's done.
-let lamissSpeech: { requestId: string; text: string; resolve: () => void } | null = null;
+let lamissSpeech: { requestId: string; text: string; language?: string; resolve: () => void } | null = null;
 
-function speakLamiss(text: string): Promise<void> {
+// language picks the voice (ISO 639-1); by default the video's language.
+function speakLamiss(text: string, language: string | undefined = lamissLiveLanguage): Promise<void> {
   stopLamissSpeech();
   if (!lamissLivePort) {
-    return speakWithBrowserVoice(text);
+    return speakWithBrowserVoice(text, language);
   }
   return new Promise((resolve) => {
     const requestId = crypto.randomUUID();
@@ -1047,8 +1151,8 @@ function speakLamiss(text: string): Promise<void> {
     };
     // Generating the audio takes a moment; this covers that plus playback.
     const limit = window.setTimeout(finish, 15_000 + text.length * 150);
-    lamissSpeech = { requestId, text, resolve: finish };
-    postLamissLive({ type: 'speak', requestId, text, ...(lamissLiveLanguage ? { language: lamissLiveLanguage } : {}) });
+    lamissSpeech = { requestId, text, language, resolve: finish };
+    postLamissLive({ type: 'speak', requestId, text, ...(language ? { language } : {}) });
   });
 }
 
@@ -1062,7 +1166,7 @@ function onLamissSpeechEvent(requestId: string, event: LamissSpeechEvent): void 
   } else if (event.type === 'failed') {
     // Still the current speech, so stopLamissSpeech can cut the fallback too.
     console.warn('Lamiss POC: Lamiss\'s voice failed, using the browser voice:', event.error);
-    void speakWithBrowserVoice(speech.text).then(speech.resolve);
+    void speakWithBrowserVoice(speech.text, speech.language).then(speech.resolve);
   }
 }
 
@@ -1079,7 +1183,7 @@ function stopLamissSpeech(): void {
 }
 
 // The browser's built-in voice: robotic, but always available.
-function speakWithBrowserVoice(text: string): Promise<void> {
+function speakWithBrowserVoice(text: string, language: string | undefined = lamissLiveLanguage): Promise<void> {
   return new Promise((resolve) => {
     if (!text || !('speechSynthesis' in window)) {
       resolve();
@@ -1094,9 +1198,9 @@ function speakWithBrowserVoice(text: string): Promise<void> {
       }
     };
     const utterance = new SpeechSynthesisUtterance(text);
-    if (lamissLiveLanguage) {
-      utterance.lang = lamissLiveLanguage;
-      const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith(lamissLiveLanguage!.toLowerCase()));
+    if (language) {
+      utterance.lang = language;
+      const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith(language.toLowerCase()));
       if (voice) {
         utterance.voice = voice;
       }
@@ -1215,7 +1319,7 @@ function createLamissQuestion(): HTMLDivElement {
   header.className = 'lamiss-question__header';
   const logo = document.createElement('span');
   logo.className = 'lamiss-question__logo';
-  logo.textContent = 'L';
+  logo.append(createLamissLogoImage());
   const heading = document.createElement('span');
   heading.className = 'lamiss-question__heading';
   header.append(logo, heading);
@@ -1303,8 +1407,12 @@ function lamissQuestionParts(): {
 }
 
 function showLamissQuestion(eventId: string, question: string): void {
+  const holdPaused = lamissPauseRequested;
+  lamissPauseRequested = false;
   // A reconnect replays the stored question; keep the conversation as it is.
   if (lamissQuestion?.eventId === eventId && lamissQuestionParts()) {
+    lamissQuestion.holdPaused ||= holdPaused;
+    updateLamissDucking();
     return;
   }
   const player = getLamissPlayer();
@@ -1316,7 +1424,7 @@ function showLamissQuestion(eventId: string, question: string): void {
   hideLamissQuestion();
   player.append(createLamissQuestion());
 
-  const state: LamissQuestionState = { eventId, question, phase: 'speaking', queued: false };
+  const state: LamissQuestionState = { eventId, question, phase: 'speaking', queued: false, holdPaused };
   lamissQuestion = state;
   const parts = lamissQuestionParts();
   if (!parts) {
@@ -1341,6 +1449,7 @@ function hideLamissQuestion(): void {
   stopLamissSpeech();
   stopLamissListening(true);
   lamissQuestion = null;
+  restoreLamissVolume();
   document.getElementById(LAMISS_QUESTION_ID)?.remove();
 }
 
@@ -1385,8 +1494,10 @@ function renderLamissQuestion(): void {
   }
   const { phase } = question;
   const listening = phase === 'listening' || phase === 'recording';
+  updateLamissDucking();
 
   parts.overlay.dataset.phase = phase;
+  parts.overlay.dataset.playing = String(!question.holdPaused);
   parts.input.readOnly = !['speaking', 'listening', 'answering'].includes(phase);
   parts.input.placeholder = listening || phase === 'speaking' ? 'Answer out loud, or type here…' : 'Type your answer…';
 
@@ -1397,7 +1508,7 @@ function renderLamissQuestion(): void {
   parts.mic.title = micLabel;
   parts.mic.setAttribute('aria-label', micLabel);
 
-  parts.submit.textContent = phase === 'feedback' ? 'Continue' : phase === 'sending' ? 'Checking…' : 'Answer';
+  parts.submit.textContent = phase === 'feedback' ? (question.holdPaused ? 'Continue' : 'Close') : phase === 'sending' ? 'Checking…' : 'Answer';
   parts.submit.disabled = phase === 'feedback'
     ? false
     : !['speaking', 'listening', 'answering'].includes(phase) || parts.input.value.trim().length === 0;
@@ -1457,7 +1568,9 @@ function submitLamissAnswer(answer: string, spokenLanguage?: string): void {
   postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer, language: spokenLanguage });
 }
 
-function showLamissFeedback(correct: boolean, feedback: string): void {
+// language: what the backend wrote the feedback in (the learner's explanation
+// language when set), so Lamiss reads it with a voice of that language.
+function showLamissFeedback(correct: boolean, feedback: string, language?: string | null): void {
   const parts = lamissQuestionParts();
   const question = lamissQuestion;
   if (!parts || !question) {
@@ -1472,11 +1585,20 @@ function showLamissFeedback(correct: boolean, feedback: string): void {
   parts.submit.focus();
 
   question.speakingFeedback = true;
-  void speakLamiss(feedback).then(() => {
+  updateLamissDucking();
+  void speakLamiss(feedback, lamissSpeechLanguage(language, lamissLiveLanguage)).then(() => {
     question.speakingFeedback = false;
-    if (lamissQuestion === question && question.resumeRequested) {
+    if (lamissQuestion !== question) {
+      return;
+    }
+    updateLamissDucking();
+    if (question.resumeRequested) {
       window.clearTimeout(lamissResumeTimer);
       lamissResumeTimer = window.setTimeout(resumeLamissVideo, LAMISS_RESUME_AFTER_SPEECH_MS);
+    } else if (!question.holdPaused) {
+      // No RESUME_VIDEO comes when the video wasn't paused: just close the card.
+      window.clearTimeout(lamissResumeTimer);
+      lamissResumeTimer = window.setTimeout(resumeLamissVideo, LAMISS_CLOSE_AFTER_FEEDBACK_MS);
     }
   });
 }
@@ -1496,8 +1618,15 @@ function onLamissResume(): void {
   }
 }
 
+// Closes the question; plays the video again only if Lamiss paused it (or
+// RESUME_VIDEO came without an open question). A video the user paused
+// during a question that let it play stays paused.
 function resumeLamissVideo(): void {
+  const question = lamissQuestion;
   hideLamissQuestion();
+  if (question && !question.holdPaused) {
+    return;
+  }
   getLamissVideo()?.play().catch((error: unknown) => {
     console.warn('Lamiss POC: could not resume the video:', error);
   });
