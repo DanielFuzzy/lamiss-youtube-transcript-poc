@@ -402,6 +402,16 @@ let lamissAuthStatus: LamissAuthState['status'] | undefined;
 // brings it back without loading the transcript again.
 let lamissResumeAfterSignIn: { videoId: string; language?: string } | undefined;
 
+// The small logo, listed in the manifest's web_accessible_resources so this page may load it.
+function createLamissLogoImage(): HTMLImageElement {
+  const image = document.createElement('img');
+  image.src = chrome.runtime.getURL('brand/lamiss-mark-small.svg');
+  image.alt = '';
+  image.width = 20;
+  image.height = 20;
+  return image;
+}
+
 function createLamissButton(): HTMLButtonElement {
   const button = document.createElement('button');
   button.id = LAMISS_PAGE_BUTTON_ID;
@@ -410,7 +420,7 @@ function createLamissButton(): HTMLButtonElement {
 
   const logo = document.createElement('span');
   logo.className = 'lamiss-start-button__logo';
-  logo.textContent = 'L';
+  logo.append(createLamissLogoImage());
   // Status dot, shown once the button shrinks to a badge (see lamissBadgeState).
   const dot = document.createElement('span');
   dot.className = 'lamiss-start-button__dot';
@@ -1309,7 +1319,7 @@ function createLamissQuestion(): HTMLDivElement {
   header.className = 'lamiss-question__header';
   const logo = document.createElement('span');
   logo.className = 'lamiss-question__logo';
-  logo.textContent = 'L';
+  logo.append(createLamissLogoImage());
   const heading = document.createElement('span');
   heading.className = 'lamiss-question__heading';
   header.append(logo, heading);

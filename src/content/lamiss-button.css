@@ -32,17 +32,23 @@
   outline-offset: 2px;
 }
 
+/* The logo's face is its background, so it sits on a white disc. */
 .lamiss-start-button__logo {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-  color: #7c3aed;
   background: #ffffff;
+}
+
+.lamiss-start-button__logo img,
+.lamiss-question__logo img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  pointer-events: none;
 }
 
 .lamiss-start-button[data-state="loading"],
@@ -195,13 +201,10 @@
 .lamiss-question__logo {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 8px;
-  font-size: 13px;
-  font-weight: 800;
-  color: #ffffff;
-  background: linear-gradient(135deg, #8b5cf6 0%, #e879f9 100%);
+  background: #ffffff;
 }
 
 .lamiss-question__text {

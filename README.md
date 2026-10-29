@@ -165,6 +165,19 @@ It needs a Chromium-based browser that still accepts `--load-extension`
 (set `LAMISS_E2E_BROWSER`; branded Google Chrome no longer does) and is not
 part of `npm test`.
 
+## Brand assets
+
+The logo lives in `src/brand/` and nowhere else:
+
+- `lamiss-logo.svg`: the logo, traced from the reference in DanielFuzzy/Lamiss#14. Transparent background:
+  the face is the background showing through, so on dark surfaces it sits on a white tile or disc.
+- `lamiss-mark-small.svg`: the same shapes slightly grown, for 16–32 px (the toolbar icon, the button on
+  the video, the question card, the chat header). It is web-accessible on youtube.com for the content script.
+
+The extension icons in `src/icons/` are rendered from these files on a white rounded square, so the face
+stays white on Chrome's dark toolbar. After changing the logo, run `node scripts/render-icons.js`
+(same browser rules as the popup e2e: `LAMISS_E2E_BROWSER`) and commit the PNGs.
+
 ## Tests
 
 ```sh

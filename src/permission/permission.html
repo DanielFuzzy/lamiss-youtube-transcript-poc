@@ -13,7 +13,6 @@
       --muted: #b4a3d6;
       --accent: #8b5cf6;
       --accent-strong: #7c3aed;
-      --pink: #e879f9;
       --success: #6ee7b7;
       --error: #fda4af;
     }
@@ -49,14 +48,11 @@
     .logo {
       display: grid;
       place-items: center;
-      width: 52px;
-      height: 52px;
+      width: 64px;
+      height: 64px;
       margin: 0 auto 16px;
-      border-radius: 16px;
-      font-size: 24px;
-      font-weight: 800;
-      color: white;
-      background: linear-gradient(135deg, var(--accent) 0%, var(--pink) 100%);
+      border-radius: 18px;
+      background: #ffffff;
       box-shadow: 0 8px 24px rgba(139, 92, 246, 0.45);
     }
 
@@ -102,7 +98,7 @@
 </head>
 <body>
   <main class="card">
-    <div class="logo" aria-hidden="true">L</div>
+    <div class="logo" aria-hidden="true"><img src="../brand/lamiss-logo.svg" alt="" width="54" height="54" /></div>
     <h1>Enable your microphone</h1>
     <p id="micStatus" aria-live="polite">Lamiss needs microphone access so you can ask questions out loud. Chrome will ask you once.</p>
     <button id="grantMic">Allow microphone</button>
