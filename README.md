@@ -25,13 +25,20 @@ Variables set in the environment take precedence.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LAMISS_API_URL` | `http://localhost:8080` | Backend origin (scheme, host, optional port). Written to `compiled/shared/lamiss-config.js` and added to the manifest's host permissions. The WebSocket URL is derived from it (`http` → `ws`, `https` → `wss`). |
+| `LAMISS_API_URL` | `config/environments.json` (`http://localhost:8080`) | Backend origin (scheme, host, optional port). Written to `compiled/shared/lamiss-config.js` and added to the manifest's host permissions. The WebSocket URL is derived from it (`http` → `ws`, `https` → `wss`). |
 | `LAMISS_GOOGLE_CLIENT_ID` | none | Public client ID of the Google OAuth client below. Without it the build prints a warning and sign-in does not work. |
 
 The client ID is public. No client secret is needed, and none may be added to
 this repository or to the build.
 
 `compiled/` is the unpacked extension. It is build output and is not committed.
+
+These variables only apply to **development** builds. Each environment's backend
+(development, staging, production) is set in `config/environments.json`; the
+staging and production packages for testers and the Chrome Web Store are made
+with `npm run package:staging` / `npm run package:production` and never read
+`.env`. See [docs/RELEASING.md](docs/RELEASING.md) for endpoints, packaging, the
+Chrome Web Store and the Release workflow, and [docs/TEST-PLAN.md](docs/TEST-PLAN.md).
 
 ## Load the extension
 

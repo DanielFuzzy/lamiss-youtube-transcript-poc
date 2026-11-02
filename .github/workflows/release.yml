@@ -1,0 +1,130 @@
+# Packages the extension and, only when asked by hand, sends it to the Chrome
+# Web Store (docs/RELEASING.md).
+#
+# - Push a tag vX.Y.Z (equal to package.json and manifest.json): the
+#   production ZIP is built, validated and attached to a draft GitHub Release.
+# - Run it by hand (Actions > Release > Run workflow): the ZIP is built for the
+#   chosen environment as a workflow artifact. With "Upload to the Chrome Web
+#   Store" checked (production only), the chrome-web-store job uploads it and,
+#   with "Submit for review" also checked, submits it. That job runs in the
+#   chrome-web-store environment: give it required reviewers in the repository
+#   settings so nothing reaches the store without an explicit approval.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which backend the package is built for
+        type: choice
+        options: [production, staging]
+        default: production
+      upload_to_chrome_web_store:
+        description: Upload the package to the Chrome Web Store as a draft (production only)
+        type: boolean
+        default: false
+      submit_for_review:
+        description: Also submit the draft for review and publication
+        type: boolean
+        default: false
+      publish_target:
+        description: default (the item's visibility, e.g. Unlisted or Public) or trustedTesters
+        type: choice
+        options: [default, trustedTesters]
+        default: default
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      zip: ${{ steps.version.outputs.zip }}
+    env:
+      LAMISS_PACKAGE_ENV: ${{ inputs.environment || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+        env:
+          LAMISS_GOOGLE_CLIENT_ID: ci-placeholder.apps.googleusercontent.com
+      - id: version
+        name: Check the version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          manifest=$(node -p "require('./manifest.json').version")
+          if [ "$version" != "$manifest" ]; then
+            echo "::error::package.json ($version) and manifest.json ($manifest) versions differ"; exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match version $version"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "zip=lamiss-$version-$LAMISS_PACKAGE_ENV.zip" >> "$GITHUB_OUTPUT"
+      # Builds dist/<env>/extension, validates manifest and contents, writes the ZIP.
+      - run: node scripts/package.js --env "$LAMISS_PACKAGE_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.zip }}
+          path: |
+            dist/${{ steps.version.outputs.zip }}
+            dist/${{ steps.version.outputs.zip }}.sha256
+          if-no-files-found: error
+
+  github-release:
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package.outputs.zip }}
+      # A draft: a person reviews and publishes it.
+      - run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
+            --title "LAMISS $GITHUB_REF_NAME" \
+            --notes "Production package for the Chrome Web Store. Check the SHA-256 against a local \`npm run package:production\`." \
+            "${{ needs.package.outputs.zip }}" "${{ needs.package.outputs.zip }}.sha256"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  chrome-web-store:
+    if: github.event_name == 'workflow_dispatch' && inputs.upload_to_chrome_web_store && inputs.environment == 'production'
+    needs: package
+    runs-on: ubuntu-latest
+    # Protected environment: its required reviewers approve before this runs,
+    # and only it can read the store credentials.
+    environment: chrome-web-store
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package.outputs.zip }}
+          path: dist
+      - run: |
+          args=("dist/${{ needs.package.outputs.zip }}" --target "${{ inputs.publish_target }}")
+          if [ "${{ inputs.submit_for_review }}" = "true" ]; then args+=(--publish); fi
+          node scripts/cws-publish.js "${args[@]}"
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
