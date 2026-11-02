@@ -107,6 +107,15 @@ has a home view and one view per settings category, each with a back arrow:
   **Sign in with Google** and Tutor Behavior / Profile & Account are disabled.
   With a daily goal set, a compact "12 of 30 min today" bar sits under Start
   Learning (`GET /api/me/practice/today`); without one it is hidden.
+- **Recent videos** (TDR-0004,
+  [docs/TDR-0004-Recent-Videos.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0004-Recent-Videos.md)):
+  the videos studied with Lamiss, most recent first (`GET /api/me/recent-videos`),
+  each with its thumbnail, title and when it was last studied. Where playback
+  stopped (a thin grey bar, "Stopped at 3:05 of 10:12") and the learning
+  progress (a pink "4 questions answered" badge) are shown apart: neither means
+  the video was finished. **Resume** opens the video at that position in a new
+  tab (only `https://www.youtube.com/watch` addresses). It has loading, empty and
+  error (**Try again**) states, and needs the account.
 - **Double Captions**: "Coming soon"; there is nothing to switch on yet.
 - **Audio & Voice**: microphone and speaker (with a level-meter microphone test
   and a test tone), tutor voice (`GET /api/speech/voices`, filtered to the

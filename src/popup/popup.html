@@ -46,6 +46,16 @@
     </div>
 
     <nav class="categories" aria-label="Settings" data-i18n-attr="aria-label:home.settings">
+      <button class="category" type="button" data-open="recent" data-needs-account>
+        <span class="tile tile-pink" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+        </span>
+        <span class="category-text">
+          <span class="category-title" data-i18n="home.recentTitle">Recent videos</span>
+          <span class="category-detail" data-signed-in-key="home.recentDetail">Continue where you left off</span>
+        </span>
+        <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+      </button>
       <button class="category" type="button" data-open="captions">
         <span class="tile tile-purple" aria-hidden="true"><span class="tile-cc">CC</span></span>
         <span class="category-text">
@@ -90,6 +100,27 @@
       <span id="statusDot" class="status-dot" data-tone="busy" aria-hidden="true"></span>
       <span id="statusText" class="status-text">Checking Lamiss…</span>
     </footer>
+  </section>
+
+  <!-- Recent videos (TDR-0004): GET /api/me/recent-videos, filled by recent-view.ts. -->
+  <section id="recentView" class="view" data-view="recent" hidden>
+    <header class="view-header">
+      <button class="back-button" type="button" data-back aria-label="Back to home" data-i18n-attr="aria-label:common.backHome">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
+      </button>
+      <h2 data-i18n="home.recentTitle">Recent videos</h2>
+    </header>
+    <div class="view-body">
+      <p class="recent-intro" data-i18n="recent.intro">The videos you studied with Lamiss, most recent first.</p>
+      <div id="recentLoading" class="loading-card" data-i18n="recent.loading">Loading your videos…</div>
+      <div id="recentError" class="error-card" hidden>
+        <p id="recentErrorText"></p>
+        <button id="recentRetryButton" class="btn btn-soft btn-small" type="button" data-i18n="common.tryAgain">Try again</button>
+      </div>
+      <p id="recentEmpty" class="empty-card" data-i18n="recent.empty" hidden>No videos yet.</p>
+      <ul id="recentList" class="recent-list" hidden></ul>
+      <p id="recentMessage" class="field-message" role="alert"></p>
+    </div>
   </section>
 
   <!-- Double Captions: not built yet (TDR-0002); says so instead of pretending. -->
@@ -444,6 +475,7 @@
   <script src="home-view.js"></script>
   <script src="audio-view.js"></script>
   <script src="tutor-view.js"></script>
+  <script src="recent-view.js"></script>
   <script src="profile-view.js"></script>
   <script src="popup.js"></script>
 </body>
