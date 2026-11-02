@@ -43,8 +43,13 @@ function googleSignsIn(env, override = {}) {
   };
 }
 
+// The privacy notice was accepted unless options.noConsent.
 function backgroundEnv(options = {}) {
-  return createExtensionEnv({ scripts: ['background.js'], responder: backend(options.extra), tabs: options.tabs });
+  const env = createExtensionEnv({ scripts: ['background.js'], responder: backend(options.extra), tabs: options.tabs });
+  if (!options.noConsent) {
+    env.local.data.set('lamissPrivacyNotice', { version: 1, acceptedAt: '2026-11-01T00:00:00.000Z' });
+  }
+  return env;
 }
 
 function signIn(env) {
@@ -110,7 +115,8 @@ test('sign-in: nonce, Google, token exchange, and the token lands in session sto
 
   assert.equal(env.session.data.get('lamissAuth').accessToken, 'secret-token');
   assert.ok(!JSON.stringify(env.local.writes).includes('secret-token'), 'token never written to storage.local');
-  assert.deepEqual(Object.keys(Object.fromEntries(env.local.data)), ['lamissSignedInBefore']);
+  // Besides the accepted privacy notice, only the "signed in before" flag.
+  assert.deepEqual(Object.keys(Object.fromEntries(env.local.data)), ['lamissPrivacyNotice', 'lamissSignedInBefore']);
 
   // Pages get the user; YouTube tabs only the status, and nobody gets the token.
   assert.deepEqual(env.runtimeSent.map(message => message.state.status), ['signedIn']);
@@ -262,7 +268,8 @@ test('sign-out revokes the session, forgets the token and the pending questions'
   assert.equal(logout.init.method, 'POST');
   assert.equal(logout.headers.get('authorization'), 'Bearer secret-token');
   assert.equal(env.session.data.has('lamissAuth'), false);
-  assert.deepEqual([...env.local.data.keys()], ['lamissQuestionSettings']);
+  // The device's settings and its accepted privacy notice stay; nothing of the account does.
+  assert.deepEqual([...env.local.data.keys()], ['lamissPrivacyNotice', 'lamissQuestionSettings']);
   assert.deepEqual(env.runtimeSent.at(-1), { type: 'lamiss:auth-changed', state: { status: 'signedOut' } });
 });
 
@@ -569,4 +576,34 @@ test('a replayed question is paused only if it was paused when first asked', asy
   socket.emit('open');
   await flush();
   assert.deepEqual(serverTypes(), ['PAUSE_VIDEO', 'ASK_QUESTION']);
+});
+
+// Privacy notice (store/privacy-data-flow.md): no sign-in before it is accepted on an extension page.
+test('sign-in: without the privacy notice accepted, Google is never asked', async () => {
+  const env = backgroundEnv({ noConsent: true });
+  googleSignsIn(env);
+  const result = await env.dispatchMessage({ type: 'lamiss:sign-in' }, senders.popup);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'consent_required');
+  assert.equal(env.identity.launches.length, 0);
+  assert.equal(env.fetchCalls.length, 0);
+});
+
+test('sign-in: "Agree and sign in" on an extension page records the acceptance and signs in', async () => {
+  const env = backgroundEnv({ noConsent: true });
+  googleSignsIn(env);
+  const result = await env.dispatchMessage({ type: 'lamiss:sign-in', acceptPrivacyNotice: true }, senders.popup);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(env.local.data.get('lamissPrivacyNotice').version, 1);
+});
+
+test('sign-in: a content script cannot accept the notice for the user', async () => {
+  const env = backgroundEnv({ noConsent: true });
+  googleSignsIn(env);
+  const result = await env.dispatchMessage({ type: 'lamiss:sign-in', acceptPrivacyNotice: true }, senders.contentScript);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'consent_required');
+  assert.match(result.error, /toolbar/);
+  assert.equal(env.local.data.has('lamissPrivacyNotice'), false);
+  assert.equal(env.identity.launches.length, 0);
 });

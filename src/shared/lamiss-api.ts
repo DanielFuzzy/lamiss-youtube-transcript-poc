@@ -70,7 +70,29 @@ type LamissSignInResult =
   | { ok: true; state: LamissAuthState }
   | { ok: false; error: string; reason: LamissSignInFailure };
 
-type LamissSignInFailure = 'cancelled' | 'interaction_required' | 'state_mismatch' | 'nonce_mismatch' | 'not_configured' | 'rejected' | 'failed';
+type LamissSignInFailure = 'cancelled' | 'interaction_required' | 'state_mismatch' | 'nonce_mismatch' | 'not_configured' | 'rejected' | 'failed' | 'consent_required';
+
+// --- Privacy notice (store/privacy-data-flow.md) ---------------------------------
+// Sign-in needs the user to have accepted, on an extension page, the notice
+// of what LAMISS sends where. Bump the version when that changes, and every
+// user is asked again at their next sign-in.
+
+const LAMISS_PRIVACY_POLICY_URL = 'https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/privacy-policy.html';
+const LAMISS_PRIVACY_NOTICE_KEY = 'lamissPrivacyNotice';
+const LAMISS_PRIVACY_NOTICE_VERSION = 1;
+
+async function hasAcceptedPrivacyNotice(): Promise<boolean> {
+  try {
+    const stored = await chrome.storage.local.get(LAMISS_PRIVACY_NOTICE_KEY);
+    return (stored[LAMISS_PRIVACY_NOTICE_KEY] as { version?: number } | undefined)?.version === LAMISS_PRIVACY_NOTICE_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+function acceptPrivacyNotice(): Promise<void> {
+  return chrome.storage.local.set({ [LAMISS_PRIVACY_NOTICE_KEY]: { version: LAMISS_PRIVACY_NOTICE_VERSION, acceptedAt: new Date().toISOString() } });
+}
 
 // Functions, not constants: they follow the app language at the time they are shown.
 function lamissSignInRequiredMessage(): string {
@@ -298,7 +320,8 @@ async function callLamiss<T>(path: string, init: RequestInit, options: LamissCal
         ...(typeof problem?.errorCode === 'string' ? { errorCode: problem.errorCode } : {})
       };
     }
-    return { ok: true, data: await response.json() as T };
+    // 204 No Content (DELETE /api/me) has no body.
+    return { ok: true, data: (response.status === 204 ? undefined : await response.json()) as T };
   } catch (error) {
     console.error('Lamiss POC: backend unreachable:', path, error);
     return { ok: false, error: lamissUnreachableMessage(), retryable: true };
@@ -825,4 +848,11 @@ function formatLamissRelativeTime(iso: string, now: number = Date.now()): string
     }
   }
   return format.format(0, 'second');
+}
+
+// --- Account (TDR-0005) ---------------------------------------------------------------
+
+// Permanently deletes the signed-in user's account and its data.
+function deleteAccount(): Promise<LamissCallResult<void>> {
+  return callLamiss<void>('/api/me', { method: 'DELETE' });
 }

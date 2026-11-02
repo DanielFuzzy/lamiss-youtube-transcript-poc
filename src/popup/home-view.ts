@@ -43,7 +43,7 @@ function renderHomeAccount(detail?: { text: string; error?: boolean }): void {
     : 'home.signInDetail');
   homeSignInDetail.classList.toggle('error', detail?.error === true);
   homeSignInButton.disabled = homeSignInBusy;
-  homeSignInButton.textContent = lamissT(homeSignInBusy ? 'common.signingIn' : 'common.signInWithGoogle');
+  homeSignInButton.textContent = lamissT(homeSignInBusy ? 'common.signingIn' : 'privacy.agreeAndSignIn');
 
   for (const card of document.querySelectorAll<HTMLButtonElement>('.category[data-needs-account]')) {
     card.disabled = !signedIn;
@@ -191,7 +191,8 @@ homeSignInButton.addEventListener('click', async () => {
   homeSignInBusy = true;
   renderHomeAccount({ text: lamissT('common.continueInGoogle') });
   // The worker runs the sign-in, so it finishes even if this popup closes.
-  const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
+  // The button says "Agree and sign in": clicking it accepts the notice above it.
+  const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE, acceptPrivacyNotice: true })
     .catch((error: unknown): LamissSignInResult => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
   homeSignInBusy = false;
   await refreshPopupAuth();

@@ -41,7 +41,14 @@ const PROFILE_LEVELS: ReadonlyArray<{ level: LamissProficiencyLevel; label: Lami
   { level: 'C2', label: 'profile.levelC2' }
 ];
 
+const profileDeleteButton = popupElement<HTMLButtonElement>('deleteAccountButton');
+const profileDeleteConfirm = popupElement<HTMLDivElement>('deleteAccountConfirm');
+const profileDeleteMessage = popupElement<HTMLParagraphElement>('deleteAccountMessage');
+const profileDeleteCancel = popupElement<HTMLButtonElement>('deleteAccountCancel');
+const profileDeleteConfirmButton = popupElement<HTMLButtonElement>('deleteAccountConfirmButton');
+
 let profileSigningOut = false;
+let profileDeleting = false;
 let profileSavingUsername = false;
 // Bumped by every practice request; an older answer is dropped.
 let profilePracticeGeneration = 0;
@@ -294,9 +301,67 @@ profileSignOutButton.addEventListener('click', async () => {
   showPopupView('home');
 });
 
+// --- Account deletion (TDR-0005) ----------------------------------------------------
+
+function closeDeleteConfirm(): void {
+  profileDeleteConfirm.hidden = true;
+  profileDeleteButton.setAttribute('aria-expanded', 'false');
+  profileDeleteMessage.textContent = '';
+}
+
+function renderDeleteBusy(): void {
+  profileDeleteConfirmButton.disabled = profileDeleting;
+  profileDeleteCancel.disabled = profileDeleting;
+  profileDeleteConfirmButton.textContent = lamissT(profileDeleting ? 'account.deleting' : 'account.deleteConfirm');
+}
+
+profileDeleteButton.addEventListener('click', () => {
+  if (profileDeleting) {
+    return;
+  }
+  const open = profileDeleteConfirm.hidden;
+  profileDeleteConfirm.hidden = !open;
+  profileDeleteButton.setAttribute('aria-expanded', String(open));
+  profileDeleteMessage.textContent = '';
+  if (open) {
+    profileDeleteCancel.focus();
+  }
+});
+
+profileDeleteCancel.addEventListener('click', () => {
+  closeDeleteConfirm();
+  profileDeleteButton.focus();
+});
+
+profileDeleteConfirmButton.addEventListener('click', async () => {
+  if (profileDeleting) {
+    return;
+  }
+  profileDeleting = true;
+  renderDeleteBusy();
+  profileDeleteMessage.textContent = '';
+  const result = await deleteAccount();
+  if (!result.ok) {
+    profileDeleting = false;
+    renderDeleteBusy();
+    profileDeleteMessage.textContent = lamissT('account.deleteFailed', { error: describePopupFailure(result) });
+    return;
+  }
+  // The token died with the account: end the local session the same way Log Out does.
+  await chrome.runtime.sendMessage({ type: LAMISS_SIGN_OUT_MESSAGE }).catch(() => undefined);
+  profileDeleting = false;
+  renderDeleteBusy();
+  closeDeleteConfirm();
+  await refreshPopupAuth();
+  showPopupView('home');
+  renderHomeAccount({ text: lamissT('account.deleted') });
+});
+
 registerPopupView('profile', {
   enter: () => {
     setPopupSaveState(profileSaveState, 'idle');
+    closeDeleteConfirm();
+    renderDeleteBusy();
     void loadProfile();
   },
   leave: () => {

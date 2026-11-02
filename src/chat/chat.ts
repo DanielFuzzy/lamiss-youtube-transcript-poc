@@ -28,6 +28,7 @@ const chatDifficultyValue = document.getElementById('difficultyValue') as HTMLOu
 const chatSignIn = document.getElementById('signIn') as HTMLDivElement;
 const chatSignInDetail = document.getElementById('signInDetail') as HTMLParagraphElement;
 const chatSignInButton = document.getElementById('signInButton') as HTMLButtonElement;
+(document.getElementById('privacyLink') as HTMLAnchorElement).href = LAMISS_PRIVACY_POLICY_URL;
 
 const CHAT_DIFFICULTIES: LamissQuestionDifficulty[] = ['EASY', 'MEDIUM', 'HARD'];
 const CHAT_DIFFICULTY_LABELS: Record<LamissQuestionDifficulty, LamissMessageKey> = { EASY: 'common.easy', MEDIUM: 'common.medium', HARD: 'common.hard' };
@@ -189,7 +190,7 @@ function chatShowSignIn(detail?: { text: string; error?: boolean }): void {
   chatSignInDetail.textContent = detail?.text ?? lamissT('chat.signInDetail');
   chatSignInDetail.classList.toggle('error', detail?.error === true);
   chatSignInButton.disabled = false;
-  chatSignInButton.textContent = lamissT('common.signInWithGoogle');
+  chatSignInButton.textContent = lamissT('privacy.agreeAndSignIn');
   chatRender();
 }
 
@@ -214,7 +215,8 @@ chatSignInButton.addEventListener('click', async () => {
   chatSignInButton.textContent = lamissT('common.signingIn');
   chatSignInDetail.textContent = lamissT('chat.continueInGoogle');
   chatSignInDetail.classList.remove('error');
-  const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
+  // The button says "Agree and sign in": clicking it accepts the notice above it.
+  const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE, acceptPrivacyNotice: true })
     .catch((error: unknown): LamissSignInResult => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
   if (!result?.ok) {
     chatShowSignIn({ text: result?.error ?? lamissT('common.signInFailed'), error: result?.reason !== 'cancelled' });
@@ -501,7 +503,7 @@ onAppLanguageChange(() => {
   chatRenderSettingLabels();
   if (!chatSignIn.hidden) {
     chatSignInDetail.textContent = lamissT('chat.signInDetail');
-    chatSignInButton.textContent = lamissT('common.signInWithGoogle');
+    chatSignInButton.textContent = lamissT('privacy.agreeAndSignIn');
   }
   void chatLoadLog();
 });
