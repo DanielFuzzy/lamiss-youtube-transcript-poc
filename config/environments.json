@@ -1,0 +1,31 @@
+{
+  "$comment": "Where each build of the extension finds its backend (docs/RELEASING.md). Read by scripts/build.js; everything here ends up in the extension, so only public values belong here (the Google client ID is public). apiUrl is scheme + host (+ port): REST uses it and the WebSocket is derived from it (https -> wss). Fill staging/production apiUrl and googleClientId before building them.",
+  "environments": {
+    "development": {
+      "apiUrl": "http://localhost:8080",
+      "googleClientId": null,
+      "allowOverrides": true,
+      "chromeWebStore": false
+    },
+    "staging": {
+      "apiUrl": null,
+      "googleClientId": null,
+      "allowOverrides": false,
+      "chromeWebStore": false
+    },
+    "production": {
+      "apiUrl": null,
+      "googleClientId": null,
+      "allowOverrides": false,
+      "chromeWebStore": true
+    },
+    "store-draft": {
+      "$comment": "Only to create the Chrome Web Store item and get its extension ID before a public backend exists (docs/RELEASING.md section 5). Upload it as a draft and never submit it for review: it points at a local backend.",
+      "apiUrl": "http://localhost:8080",
+      "googleClientId": null,
+      "allowOverrides": false,
+      "chromeWebStore": true,
+      "localBackend": true
+    }
+  }
+}

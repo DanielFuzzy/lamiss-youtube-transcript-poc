@@ -291,3 +291,10 @@ test('profile PATCH: 200 is the new profile, 400 and 409 get friendly messages',
   env.context.broken = await env.run("updateUsername('bob')");
   assert.equal(env.run('describeUsernameFailure(broken)'), 'Something broke');
 });
+
+test('account: DELETE /api/me with the token; 204 is a success without a body', async () => {
+  const env = pageEnv(async (url, init) => (url === `${API_BASE_URL}/api/me` && init.method === 'DELETE' ? { status: 204 } : { status: 404, json: {} }));
+  assert.deepEqual(plain(await env.run('deleteAccount()')), { ok: true });
+  assert.equal(env.fetchCalls[0].init.method, 'DELETE');
+  assert.equal(env.fetchCalls[0].headers.get('authorization'), 'Bearer secret-token');
+});

@@ -18,6 +18,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Type-checks every TypeScript file (there is no separate linter).
+      - run: npm run lint
       # Builds compiled/ and runs every test/*.test.js. The client ID is a
       # placeholder: Google is never contacted in tests.
       - run: npm test

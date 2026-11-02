@@ -5,8 +5,12 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build.js",
+    "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test \"test/**/*.test.js\"",
-    "phase3:verify": "npm run build && node scripts/phase3-verify.js"
+    "package:staging": "node scripts/package.js --env staging",
+    "package:production": "node scripts/package.js --env production",
+    "phase3:verify": "npm run build && node scripts/phase3-verify.js",
+    "package:store-draft": "node scripts/package.js --env store-draft"
   },
   "devDependencies": {
     "@types/chrome": "latest",

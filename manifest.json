@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Lamiss",
+  "name": "LAMISS",
   "version": "0.1.0",
   "description": "Practice a language while you watch YouTube: Lamiss asks you questions about the video and answers yours, by voice or text.",
   "minimum_chrome_version": "116",

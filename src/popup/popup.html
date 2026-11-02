@@ -26,7 +26,11 @@
         <p id="signInTitle" class="sign-in-title">Sign in to start learning</p>
         <p id="signInDetail" class="sign-in-detail">Lamiss keeps your settings and progress with your Google account.</p>
       </div>
-      <button id="signInButton" class="btn btn-primary btn-block" type="button" data-i18n="common.signInWithGoogle">Sign in with Google</button>
+      <p class="privacy-notice">
+        <span data-i18n="privacy.notice">To tutor you, LAMISS sends the video's captions, your questions and your spoken or typed answers to its server and to OpenAI, and keeps your progress with your Google account.</span>
+        <a class="privacy-link" target="_blank" rel="noopener" data-i18n="privacy.policyLink">Privacy policy</a>
+      </p>
+      <button id="signInButton" class="btn btn-primary btn-block" type="button" data-i18n="privacy.agreeAndSignIn">Agree and sign in with Google</button>
     </section>
 
     <button id="startButton" class="start-button" type="button" disabled>
@@ -458,6 +462,20 @@
           </div>
           <span class="progress-bar" aria-hidden="true"><span id="profileProgressFill" class="progress-fill"></span></span>
         </div>
+      </section>
+
+      <!-- TDR-0005: permanent deletion, after a confirmation. -->
+      <section class="danger-zone">
+        <button id="deleteAccountButton" class="btn btn-ghost-danger btn-block" type="button" aria-expanded="false" aria-controls="deleteAccountConfirm" data-i18n="account.delete">Delete my account</button>
+        <div id="deleteAccountConfirm" class="delete-confirm" role="alertdialog" aria-labelledby="deleteAccountWarning" hidden>
+          <p id="deleteAccountWarning" data-i18n="account.deleteWarning">This permanently deletes your LAMISS account.</p>
+          <p id="deleteAccountMessage" class="field-message" data-tone="error" aria-live="polite"></p>
+          <div class="username-actions">
+            <button id="deleteAccountCancel" class="btn btn-soft btn-small" type="button" data-i18n="common.cancel">Cancel</button>
+            <button id="deleteAccountConfirmButton" class="btn btn-danger btn-small" type="button" data-i18n="account.deleteConfirm">Delete permanently</button>
+          </div>
+        </div>
+        <a class="privacy-link privacy-footer" target="_blank" rel="noopener" data-i18n="privacy.policyLink">Privacy policy</a>
       </section>
 
       <button id="signOutButton" class="btn btn-danger btn-block" type="button">

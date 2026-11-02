@@ -176,6 +176,8 @@ async function answerBackend(route, apiBase) {
       return json(200, voices);
     case 'POST /api/speech/synthesis':
       return route.fulfill({ status: 200, contentType: 'audio/wav', body: silentWav() });
+    case 'DELETE /api/me':
+      return json(500, { detail: 'Database unavailable', retryable: true });
     case 'POST /api/auth/logout':
       return route.fulfill({ status: 204 });
     default:
@@ -321,6 +323,9 @@ async function main() {
     await popup.goto(popupUrl);
     await popup.waitForSelector('#statusText:not(:has-text("Checking"))');
     check(await popup.locator('#signInCard').isVisible(), 'signed out: the sign-in card shows');
+    check((await popup.locator('#signInCard .privacy-notice').textContent()).includes('OpenAI'), 'signed out: the privacy notice says what goes to OpenAI');
+    check(await popup.locator('#signInCard a.privacy-link').getAttribute('href') === 'https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/privacy-policy.html', 'signed out: the notice links the privacy policy');
+    check(await popup.locator('#signInButton').textContent() === 'Agree and sign in with Google', 'signed out: signing in is agreeing to the notice');
     check(await popup.locator('.category[data-open="tutor"]').isDisabled(), 'signed out: Tutor Behavior needs the account');
     check(await popup.locator('.category[data-open="recent"]').isDisabled(), 'signed out: Recent videos needs the account');
     check(await popup.locator('#startButton').isDisabled(), 'signed out: Start Learning is disabled');
@@ -553,6 +558,22 @@ async function main() {
     await shot('10-tutor-error');
     await popup.unroute(`${apiBase}/api/me/preferences`);
     await back('tutor');
+
+    // Delete my account (TDR-0005): a confirmation first; a failed delete keeps everything.
+    await popup.locator('.category[data-open="profile"]').click();
+    await popup.waitForSelector('#profilePreferences:not([hidden])');
+    check(await popup.locator('#deleteAccountConfirm').isHidden(), 'delete: nothing happens without a confirmation');
+    await popup.locator('#deleteAccountButton').click();
+    check(await popup.locator('#deleteAccountConfirm').isVisible(), 'delete: asks to confirm, saying it is permanent');
+    await shotBottom('11b-delete-confirm', 'profile');
+    await popup.locator('#deleteAccountCancel').click();
+    check(await popup.locator('#deleteAccountConfirm').isHidden() && backendCalls.every(call => call.call !== 'DELETE /api/me'), 'delete: Cancel sends nothing');
+    await popup.locator('#deleteAccountButton').click();
+    await popup.locator('#deleteAccountConfirmButton').click();
+    await popup.waitForFunction(() => document.getElementById('deleteAccountMessage').textContent !== '');
+    check((await popup.locator('#deleteAccountMessage').textContent()).startsWith('Your account was not deleted'), 'delete: a failed DELETE /api/me says so and keeps the account');
+    check(backendCalls.some(call => call.call === 'DELETE /api/me' && call.authorized), 'delete: DELETE /api/me carries the token');
+    await back('profile');
 
     // Log out → signed-out home.
     await popup.locator('.category[data-open="profile"]').click();

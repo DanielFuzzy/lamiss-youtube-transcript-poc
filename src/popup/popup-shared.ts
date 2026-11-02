@@ -70,6 +70,15 @@ async function refreshPopupAuth(): Promise<void> {
   popupAuthListeners.forEach(listener => listener());
 }
 
+// Every "Privacy policy" link in the page.
+function fillPrivacyLinks(root: ParentNode = document): void {
+  for (const link of root.querySelectorAll<HTMLAnchorElement>('a.privacy-link')) {
+    link.href = LAMISS_PRIVACY_POLICY_URL;
+  }
+}
+
+fillPrivacyLinks();
+
 // --- Backend results ------------------------------------------------------------
 
 // What to tell the user about a failed call. A 401 already ended the stored

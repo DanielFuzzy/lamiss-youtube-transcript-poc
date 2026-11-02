@@ -130,6 +130,10 @@ async function ingestTranscript(payload: TranscriptIngestPayload): Promise<Trans
   if (!accessToken) {
     return { ok: false, status: 401, error: lamissSignInRequiredMessage(), signInRequired: true };
   }
+  const misconfigured = lamissMisconfigured();
+  if (misconfigured) {
+    return { ok: false, error: misconfigured.error };
+  }
   try {
     const response = await fetch(LAMISS_TRANSCRIPT_INGEST_ENDPOINT, withAuthorization({
       method: 'POST',
@@ -1298,9 +1302,22 @@ async function signInWithGoogle(interactive: boolean): Promise<LamissSignInResul
 
 // When no sign-in is stored or the backend rejected it, try once without
 // showing anything; the sign-in button is the fallback.
+// The privacy notice comes first: only an extension page shows it, so only
+// one can accept it (the user clicked "Agree and sign in"). A content script
+// asking for a sign-in without it gets consent_required.
+async function signInIfNoticeAccepted(fromContentScript: boolean, accept: boolean): Promise<LamissSignInResult> {
+  if (accept && !fromContentScript) {
+    await acceptPrivacyNotice();
+  }
+  if (!(await hasAcceptedPrivacyNotice())) {
+    return { ok: false, reason: 'consent_required', error: lamissT(fromContentScript ? 'privacy.openToolbar' : 'privacy.consentRequired') };
+  }
+  return signInWithGoogle(true);
+}
+
 async function trySilentSignIn(): Promise<void> {
   try {
-    if (!LAMISS_GOOGLE_CLIENT_ID || (await readAuthState()).status === 'signedIn') {
+    if (!LAMISS_GOOGLE_CLIENT_ID || (await readAuthState()).status === 'signedIn' || !(await hasAcceptedPrivacyNotice())) {
       return;
     }
     const local = await chrome.storage.local.get(LAMISS_SIGNED_IN_BEFORE_KEY);
@@ -1324,6 +1341,10 @@ async function trySilentSignIn(): Promise<void> {
 
 // Best effort: a failed or rejected logout still ends the session locally.
 async function revokeAccessToken(accessToken: string): Promise<void> {
+  // Never send the token to an address the build can't vouch for.
+  if (lamissBackendConfigProblem()) {
+    return;
+  }
   try {
     await fetch(`${LAMISS_API_BASE_URL}/api/auth/logout`, withAuthorization({ method: 'POST' }, accessToken));
   } catch {
@@ -1395,9 +1416,10 @@ addLamissMessageListener((message: { type?: string; state?: { status?: string } 
       });
       return true;
     case LAMISS_SIGN_IN_MESSAGE:
-      void signInWithGoogle(true).then((result) => {
-        sendResponse(fromContentScript && result.ok ? { ok: true, state: { status: result.state.status } } : result);
-      });
+      void signInIfNoticeAccepted(fromContentScript, (message as { acceptPrivacyNotice?: unknown }).acceptPrivacyNotice === true)
+        .then((result) => {
+          sendResponse(fromContentScript && result.ok ? { ok: true, state: { status: result.state.status } } : result);
+        });
       return true;
     case LAMISS_SIGN_OUT_MESSAGE:
       void signOutOfLamiss().then(sendResponse);

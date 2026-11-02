@@ -1,30 +1,38 @@
 // Copies the extension's static files next to the compiled TypeScript and
 // writes the backend location into it.
 //
-//   node scripts/build.js [outDir]
+//   node scripts/build.js [outDir] [--env development|staging|production]
 //
-// outDir defaults to compiled/. The backend comes from the LAMISS_API_URL
-// environment variable (default http://localhost:8080, the local backend):
-// it is written to shared/lamiss-config.js and added to the manifest's host
-// permissions. The WebSocket URL is derived from it (http -> ws, https -> wss).
+// outDir defaults to compiled/; the environment to LAMISS_ENV, else
+// development. Each environment's backend and Google client ID come from
+// config/environments.json (see docs/RELEASING.md) and are written to
+// shared/lamiss-config.js; the backend origin is added to the manifest's host
+// permissions, and the WebSocket URL is derived from it (http -> ws, https -> wss).
 //
-// LAMISS_GOOGLE_CLIENT_ID is the public client ID of the Google "Web
-// application" OAuth client used for sign-in (see README.md). It is not a
-// secret; without it the build still succeeds but sign-in cannot work.
+// Development only: LAMISS_API_URL and LAMISS_GOOGLE_CLIENT_ID (from the shell
+// or a git-ignored .env) override the file, for a local or test backend.
+// Staging and production never read .env, refuse those variables, and need
+// https on a public host. Production is the Chrome Web Store package: its
+// manifest loses "key" (the store assigns the extension ID).
 const fs = require('fs');
 const path = require('path');
+const { resolveBuildConfig } = require('./lib/build-config');
 
 const root = path.resolve(__dirname, '..');
 
+const args = process.argv.slice(2);
+const envFlag = args.indexOf('--env');
+const environmentName = envFlag >= 0 ? args[envFlag + 1] : (process.env.LAMISS_ENV || 'development');
+const positional = args.filter((arg, index) => !arg.startsWith('--') && index !== envFlag + 1);
+
 // Optional git-ignored .env next to package.json (KEY=value lines), so a plain
 // `npm run build` or `npm test` keeps the same settings. Variables already set
-// in the environment win.
+// in the environment win. Never for staging or production builds.
 const envFile = path.join(root, '.env');
-if (fs.existsSync(envFile)) {
+if (environmentName === 'development' && fs.existsSync(envFile)) {
   process.loadEnvFile(envFile);
 }
-const outDir = path.resolve(root, process.argv[2] || 'compiled');
-const DEFAULT_API_URL = 'http://localhost:8080';
+const outDir = path.resolve(root, positional[0] || 'compiled');
 
 const staticFiles = [
   ['src/popup/popup.html', 'popup/popup.html'],
@@ -46,48 +54,6 @@ function fail(message) {
   process.exit(1);
 }
 
-// The backend's origin, without a path: "https://api.example.com".
-function readApiUrl() {
-  const raw = process.env.LAMISS_API_URL || DEFAULT_API_URL;
-  let url;
-  try {
-    url = new URL(raw);
-  } catch {
-    fail(`LAMISS_API_URL is not a valid URL: ${raw}`);
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    fail(`LAMISS_API_URL must be http:// or https://, got ${raw}`);
-  }
-  if ((url.pathname !== '/' && url.pathname !== '') || url.search || url.hash || url.username || url.password) {
-    fail(`LAMISS_API_URL must be only scheme, host and optional port (e.g. https://api.example.com), got ${raw}`);
-  }
-  return url;
-}
-
-// The public Google OAuth client ID, or '' (with a loud warning) when unset.
-function readGoogleClientId() {
-  const clientId = (process.env.LAMISS_GOOGLE_CLIENT_ID || '').trim();
-  if (!clientId) {
-    console.warn([
-      '',
-      '********************************************************************',
-      '* Lamiss build: LAMISS_GOOGLE_CLIENT_ID is not set.                *',
-      '* The extension builds, but "Sign in with Google" will not work.   *',
-      '* See README.md for how to create the OAuth client.                *',
-      '********************************************************************',
-      ''
-    ].join('\n'));
-    return '';
-  }
-  if (!/^[A-Za-z0-9.-]+$/.test(clientId)) {
-    fail(`LAMISS_GOOGLE_CLIENT_ID contains unexpected characters: ${clientId}`);
-  }
-  if (!clientId.endsWith('.apps.googleusercontent.com')) {
-    console.warn(`Lamiss build: warning: LAMISS_GOOGLE_CLIENT_ID does not end with .apps.googleusercontent.com (${clientId}).`);
-  }
-  return clientId;
-}
-
 function copyFile(source, destination) {
   const from = path.join(root, source);
   if (!fs.existsSync(from)) {
@@ -98,10 +64,24 @@ function copyFile(source, destination) {
   fs.copyFileSync(from, to);
 }
 
-const apiUrl = readApiUrl();
-const apiOrigin = apiUrl.origin;
-const wsOrigin = `${apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${apiUrl.host}`;
-const googleClientId = readGoogleClientId();
+let config;
+try {
+  config = resolveBuildConfig(JSON.parse(fs.readFileSync(path.join(root, 'config', 'environments.json'), 'utf8')), environmentName, process.env);
+} catch (error) {
+  fail(error.message);
+}
+const { apiOrigin, wsOrigin, googleClientId } = config;
+if (!googleClientId) {
+  console.warn([
+    '',
+    '********************************************************************',
+    '* Lamiss build: no Google client ID (LAMISS_GOOGLE_CLIENT_ID).     *',
+    '* The extension builds, but "Sign in with Google" will not work.   *',
+    '* See README.md for how to create the OAuth client.                *',
+    '********************************************************************',
+    ''
+  ].join('\n'));
+}
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const [source, destination] of staticFiles) {
@@ -111,7 +91,8 @@ for (const [source, destination] of staticFiles) {
 fs.mkdirSync(path.join(outDir, 'shared'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'shared', 'lamiss-config.js'), [
   '"use strict";',
-  '// Generated by scripts/build.js from LAMISS_API_URL and LAMISS_GOOGLE_CLIENT_ID. Do not edit.',
+  `// Generated by scripts/build.js for the ${config.environment} environment (config/environments.json). Do not edit.`,
+  `const LAMISS_ENVIRONMENT = ${JSON.stringify(config.environment)};`,
   `const LAMISS_API_BASE_URL = ${JSON.stringify(apiOrigin)};`,
   `const LAMISS_WS_BASE_URL = ${JSON.stringify(wsOrigin)};`,
   `const LAMISS_GOOGLE_CLIENT_ID = ${JSON.stringify(googleClientId)};`,
@@ -121,8 +102,12 @@ fs.writeFileSync(path.join(outDir, 'shared', 'lamiss-config.js'), [
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 // The fixed key pins the extension ID, which the Google OAuth redirect URI
 // (https://<id>.chromiumapp.org/) and the backend's CORS allowlist depend on.
+// The Chrome Web Store refuses it: the store item has its own ID.
 if (typeof manifest.key !== 'string' || !manifest.key) {
   fail('manifest.json must keep its "key": it fixes the extension ID used for Google sign-in');
+}
+if (config.chromeWebStore) {
+  delete manifest.key;
 }
 if (!manifest.permissions.includes('identity')) {
   fail('manifest.json must keep the "identity" permission: Google sign-in uses chrome.identity');
@@ -133,4 +118,4 @@ if (!manifest.host_permissions.includes(backendPermission)) {
 }
 fs.writeFileSync(path.join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
-console.log(`Lamiss build: wrote ${path.relative(root, outDir) || '.'}/ for the backend at ${apiOrigin} (${wsOrigin}).`);
+console.log(`Lamiss build: wrote ${path.relative(root, outDir) || '.'}/ (${config.environment}) for the backend at ${apiOrigin} (${wsOrigin}).`);

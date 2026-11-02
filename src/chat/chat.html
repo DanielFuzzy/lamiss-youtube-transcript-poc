@@ -249,6 +249,18 @@
       color: var(--error);
     }
 
+    .privacy-notice {
+      margin: 0 0 10px;
+      font-size: 11.5px;
+      line-height: 1.4;
+      color: var(--muted, #b9aed6);
+    }
+
+    .privacy-notice a {
+      color: inherit;
+      font-weight: 600;
+    }
+
     .sign-in-button {
       height: 34px;
       padding: 0 16px;
@@ -507,7 +519,11 @@
     <div id="signIn" class="sign-in" hidden>
       <p class="sign-in-title" data-i18n="chat.signInTitle">Sign in to use Lamiss</p>
       <p id="signInDetail" class="sign-in-detail">Your conversations are saved to your Lamiss account.</p>
-      <button id="signInButton" class="sign-in-button" type="button">Sign in with Google</button>
+      <p class="privacy-notice">
+        <span data-i18n="privacy.notice">To tutor you, LAMISS sends the video's captions, your questions and your spoken or typed answers to its server and to OpenAI, and keeps your progress with your Google account.</span>
+        <a id="privacyLink" target="_blank" rel="noopener" data-i18n="privacy.policyLink">Privacy policy</a>
+      </p>
+      <button id="signInButton" class="sign-in-button" type="button">Agree and sign in with Google</button>
     </div>
     <p class="note" data-i18n="chat.note">Ask Lamiss anything about this video. Your question is tied to the moment you ask it. Lamiss's questions and your answers show up here too.</p>
     <div id="log"></div>
