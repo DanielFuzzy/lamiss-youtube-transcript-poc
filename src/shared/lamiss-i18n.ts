@@ -105,6 +105,26 @@ const LAMISS_MESSAGES = {
   'home.statusOpeningChat': ["Opening the chat…", "Abriendo el chat…", "Ouverture du chat…", "Chat wird geöffnet…", "Abrindo o chat…"],
   'home.statusJoining': ["Lamiss is joining this video…", "Lamiss se está uniendo a este vídeo…", "Lamiss rejoint cette vidéo…", "Lamiss kommt zu diesem Video…", "A Lamiss está entrando neste vídeo…"],
 
+  // --- Popup: recent videos (TDR-0004) -----------------------------------------------
+  'home.recentTitle': ["Recent videos", "Vídeos recientes", "Vidéos récentes", "Letzte Videos", "Vídeos recentes"],
+  'home.recentDetail': ["Continue where you left off", "Continúa donde lo dejaste", "Reprends là où tu t'es arrêté", "Mach da weiter, wo du aufgehört hast", "Continue de onde parou"],
+  'recent.intro': ["The videos you studied with Lamiss, most recent first.", "Los vídeos que has estudiado con Lamiss, los más recientes primero.", "Les vidéos étudiées avec Lamiss, les plus récentes d'abord.", "Die Videos, die du mit Lamiss gelernt hast, die neuesten zuerst.", "Os vídeos que você estudou com a Lamiss, os mais recentes primeiro."],
+  'recent.loading': ["Loading your videos…", "Cargando tus vídeos…", "Chargement de tes vidéos…", "Deine Videos werden geladen…", "Carregando seus vídeos…"],
+  'recent.empty': ["No videos yet. Open a YouTube video and press Start Learning: it will show up here.", "Aún no hay vídeos. Abre un vídeo de YouTube y pulsa Empezar a aprender: aparecerá aquí.", "Pas encore de vidéos. Ouvre une vidéo YouTube et clique sur Commencer : elle apparaîtra ici.", "Noch keine Videos. Öffne ein YouTube-Video und klicke auf „Lernen starten“: Es erscheint dann hier.", "Ainda não há vídeos. Abra um vídeo do YouTube e toque em Começar a aprender: ele aparecerá aqui."],
+  'recent.untitled': ["YouTube video", "Vídeo de YouTube", "Vidéo YouTube", "YouTube-Video", "Vídeo do YouTube"],
+  'recent.stoppedAt': ["Stopped at {position} of {duration}", "Parado en {position} de {duration}", "Arrêté à {position} sur {duration}", "Angehalten bei {position} von {duration}", "Parou em {position} de {duration}"],
+  'recent.stoppedAtNoDuration': ["Stopped at {position}", "Parado en {position}", "Arrêté à {position}", "Angehalten bei {position}", "Parou em {position}"],
+  'recent.notPlayed': ["Not played yet", "Aún sin reproducir", "Pas encore lu", "Noch nicht abgespielt", "Ainda não reproduzido"],
+  'recent.noQuestions': ["No questions answered yet", "Ninguna pregunta respondida aún", "Aucune question répondue pour l'instant", "Noch keine Fragen beantwortet", "Nenhuma pergunta respondida ainda"],
+  'recent.oneQuestion': ["1 question answered", "1 pregunta respondida", "1 question répondue", "1 Frage beantwortet", "1 pergunta respondida"],
+  'recent.questions': ["{count} questions answered", "{count} preguntas respondidas", "{count} questions répondues", "{count} Fragen beantwortet", "{count} perguntas respondidas"],
+  'recent.resume': ["Resume", "Reanudar", "Reprendre", "Fortsetzen", "Retomar"],
+  'recent.watch': ["Watch", "Ver", "Regarder", "Ansehen", "Assistir"],
+  'recent.resumeLabel': ["Resume \"{title}\" at {position}", "Reanudar «{title}» en {position}", "Reprendre « {title} » à {position}", "„{title}“ bei {position} fortsetzen", "Retomar \"{title}\" em {position}"],
+  'recent.watchLabel': ["Watch \"{title}\"", "Ver «{title}»", "Regarder « {title} »", "„{title}“ ansehen", "Assistir \"{title}\""],
+  'recent.cantOpen': ["Lamiss can't open this video.", "Lamiss no puede abrir este vídeo.", "Lamiss ne peut pas ouvrir cette vidéo.", "Lamiss kann dieses Video nicht öffnen.", "A Lamiss não consegue abrir este vídeo."],
+  'recent.playback': ["Where the video stopped", "Dónde se detuvo el vídeo", "Où la vidéo s'est arrêtée", "Wo das Video angehalten wurde", "Onde o vídeo parou"],
+
   // --- Popup: double captions --------------------------------------------------------
   'captions.comingSoon': ["Coming soon", "Próximamente", "Bientôt disponible", "Demnächst", "Em breve"],
   'captions.intro': ["Original and translated subtitles, together while you watch.", "Subtítulos originales y traducidos, juntos mientras ves el vídeo.", "Sous-titres originaux et traduits, ensemble pendant que tu regardes.", "Original- und übersetzte Untertitel zusammen, während du schaust.", "Legendas originais e traduzidas, juntas enquanto você assiste."],

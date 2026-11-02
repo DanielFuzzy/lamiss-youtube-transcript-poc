@@ -711,3 +711,77 @@ function questionFrequencyFor(seconds: number): LamissQuestionFrequency {
   return LAMISS_QUESTION_FREQUENCIES.reduce((best, choice) =>
     Math.abs(choice.seconds - seconds) < Math.abs(best.seconds - seconds) ? choice : best).key;
 }
+
+// --- Recent videos (TDR-0004) ------------------------------------------------------
+
+// GET /api/me/recent-videos. playback (where the video stopped) and
+// learningProgress (questions answered) are separate measures: neither says
+// the video was finished. Optional fields are null when unknown.
+type LamissRecentVideo = {
+  videoId: number;
+  platform: string | null;
+  externalVideoId: string | null;
+  title: string | null;
+  thumbnailUrl: string | null;
+  videoUrl: string | null;
+  durationSeconds: number | null;
+  lastStudiedAt: string;
+  playback: { lastPositionMs: number } | null;
+  learningProgress: { questionsAnswered: number };
+};
+
+const LAMISS_RECENT_VIDEOS_LIMIT = 20;
+
+function fetchRecentVideos(limit = LAMISS_RECENT_VIDEOS_LIMIT): Promise<LamissCallResult<{ videos: LamissRecentVideo[] }>> {
+  return callLamiss<{ videos: LamissRecentVideo[] }>(`/api/me/recent-videos?limit=${limit}`, { headers: { accept: 'application/json' } });
+}
+
+// Where to resume: the YouTube watch page at the saved position, or undefined
+// when the video has no YouTube address. Nothing but youtube.com/watch is opened.
+function lamissResumeUrl(video: LamissRecentVideo): string | undefined {
+  if (!video.videoUrl) {
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(video.videoUrl);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'www.youtube.com' || url.pathname !== '/watch' || !url.searchParams.get('v')) {
+    return undefined;
+  }
+  const seconds = Math.floor((video.playback?.lastPositionMs ?? 0) / 1000);
+  if (seconds > 0) {
+    url.searchParams.set('t', `${seconds}s`);
+  }
+  return url.toString();
+}
+
+// "3:05", or "1:02:03" past an hour.
+function formatLamissDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = String(seconds % 60).padStart(2, '0');
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+}
+
+// "2 hours ago", "yesterday"… in the app language.
+function formatLamissRelativeTime(iso: string, now: number = Date.now()): string {
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) {
+    return '';
+  }
+  const seconds = Math.round((time - now) / 1000);
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ['year', 31_536_000], ['month', 2_592_000], ['week', 604_800], ['day', 86_400], ['hour', 3600], ['minute', 60]
+  ];
+  const format = new Intl.RelativeTimeFormat(lamissAppLanguage, { numeric: 'auto' });
+  for (const [unit, size] of units) {
+    if (Math.abs(seconds) >= size) {
+      return format.format(Math.round(seconds / size), unit);
+    }
+  }
+  return format.format(0, 'second');
+}

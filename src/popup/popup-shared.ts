@@ -2,7 +2,7 @@
 // user's preferences and profile, loaded once per popup and saved in order.
 // Loaded after shared/lamiss-auth.js and before the view scripts (popup.html).
 
-type PopupViewName = 'home' | 'captions' | 'audio' | 'tutor' | 'profile';
+type PopupViewName = 'home' | 'recent' | 'captions' | 'audio' | 'tutor' | 'profile';
 
 type PopupViewHooks = {
   // Called every time the view is shown: it reloads what it shows.
@@ -40,7 +40,7 @@ function showPopupView(name: PopupViewName): void {
 }
 
 // The views that need the Lamiss account.
-const POPUP_ACCOUNT_VIEWS: ReadonlySet<PopupViewName> = new Set(['tutor', 'profile']);
+const POPUP_ACCOUNT_VIEWS: ReadonlySet<PopupViewName> = new Set(['recent', 'tutor', 'profile']);
 
 // --- Sign-in ------------------------------------------------------------------
 
