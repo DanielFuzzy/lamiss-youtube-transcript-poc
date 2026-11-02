@@ -3,7 +3,9 @@
 // Pure functions, so test/build-config.test.js can check every rule.
 'use strict';
 
-const ENVIRONMENTS = ['development', 'staging', 'production'];
+// store-draft: a store package (no manifest key) for a local backend, only to
+// create the Chrome Web Store item as a draft; never submitted for review.
+const ENVIRONMENTS = ['development', 'staging', 'production', 'store-draft'];
 
 // Hosts that only make sense on a developer's machine or private network.
 function isLocalOrPrivateHost(hostname) {
@@ -71,6 +73,7 @@ function resolveBuildConfig(environments, name, env = {}) {
     throw new Error(`config/environments.json has no "${name}" environment`);
   }
   const development = name === 'development';
+  const localBackend = name === 'store-draft' && settings.localBackend === true;
   const allowOverrides = development && settings.allowOverrides === true;
   const overrides = ['LAMISS_API_URL', 'LAMISS_GOOGLE_CLIENT_ID'].filter(key => (env[key] ?? '').trim() !== '');
   if (overrides.length > 0 && !allowOverrides) {
@@ -81,12 +84,12 @@ function resolveBuildConfig(environments, name, env = {}) {
   if (!rawApiUrl) {
     throw new Error(`no apiUrl for "${name}": set environments.${name}.apiUrl in config/environments.json`);
   }
-  const apiUrl = parseApiUrl(rawApiUrl, { secure: !development });
+  const apiUrl = parseApiUrl(rawApiUrl, { secure: !development && !localBackend });
 
   const googleClientId = ((allowOverrides && env.LAMISS_GOOGLE_CLIENT_ID) || settings.googleClientId || '').trim();
   if (googleClientId) {
     checkGoogleClientId(googleClientId);
-  } else if (!development) {
+  } else if (!development && !localBackend) {
     throw new Error(`no googleClientId for "${name}": set environments.${name}.googleClientId in config/environments.json`);
   }
 

@@ -204,3 +204,12 @@ test('chrome web store: missing credentials, a rejected package or a refused sub
   const badToken = fakeStore([{ status: 400, json: { error: 'invalid_grant' } }]);
   await assert.rejects(releaseToChromeWebStore({ zipBytes: Buffer.from('zip'), env: storeEnv, fetchImpl: badToken.fetchImpl }), /invalid_grant/);
 });
+
+test('build config: store-draft is a store package for a local backend, without overrides', () => {
+  const draft = resolveBuildConfig(environments(), 'store-draft', {});
+  assert.equal(draft.apiOrigin, 'http://localhost:8080');
+  assert.equal(draft.chromeWebStore, true, 'no manifest key');
+  assert.throws(() => resolveBuildConfig(environments(), 'store-draft', { LAMISS_API_URL: 'http://localhost:9999' }), /can only override development/);
+  // Production keeps refusing what store-draft allows.
+  assert.throws(() => resolveBuildConfig(environments({ production: { apiUrl: 'http://localhost:8080', googleClientId: CLIENT_ID } }), 'production', {}), /https/);
+});

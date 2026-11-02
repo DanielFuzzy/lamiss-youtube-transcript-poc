@@ -61,3 +61,6 @@ writeZip(outDir, files, zipPath);
 const sha256 = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex');
 fs.writeFileSync(`${zipPath}.sha256`, `${sha256}  ${path.basename(zipPath)}\n`);
 console.log(`Lamiss package: ${path.relative(root, zipPath)} (${files.length} files, sha256 ${sha256})`);
+if (environment === 'store-draft') {
+  console.log('Lamiss package: store-draft points at a LOCAL backend. Upload it only as a draft to create the store item; never submit it for review.');
+}
