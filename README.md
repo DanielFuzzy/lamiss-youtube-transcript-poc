@@ -146,8 +146,9 @@ a reconnect pauses only if it did the first time.
 [docs/TDR-0003-Language-Preferences.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0003-Language-Preferences.md)).
 Three languages, each set apart from the others:
 
-- **App language**: what the extension shows. The row of `EN ES FR DE PT` at the
-  top of the popup switches the popup, the chat panel, the microphone page and
+- **App language**: what the extension shows. The row of five small flags
+  (United Kingdom, Spain, France, Germany, Portugal; each named in its own
+  language for screen readers and on hover) at the top of the popup switches the popup, the chat panel, the microphone page and
   everything Lamiss shows on YouTube, at once. It starts as the browser's
   language when it is one of the five, else English. Strings live in one
   catalog, `src/shared/lamiss-i18n.ts` (`lamissT(key, params)`; HTML uses

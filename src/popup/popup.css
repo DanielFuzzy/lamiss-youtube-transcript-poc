@@ -168,13 +168,13 @@ html[data-lamiss-i18n='pending'] body {
   visibility: hidden;
 }
 
-/* The app language picker: five compact choices above the logo (TDR-0003). */
+/* The app language picker: five small flags above the logo (TDR-0003). */
 .app-language {
   display: flex;
   justify-content: flex-end;
   gap: 2px;
   margin: 10px 12px -6px auto;
-  padding: 2px;
+  padding: 3px;
   width: max-content;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -182,26 +182,40 @@ html[data-lamiss-i18n='pending'] body {
 }
 
 .app-language button {
-  min-width: 30px;
-  padding: 3px 6px;
+  display: flex;
+  padding: 4px 5px;
   border: none;
   border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  color: var(--muted);
   background: transparent;
   cursor: pointer;
 }
 
-.app-language button:hover:not([aria-pressed='true']) {
-  color: var(--accent);
-  background: var(--accent-softer);
+/* The flags bring their own colors: none of the popup's icon stroke. */
+.app-language svg {
+  width: 21px;
+  height: 14px;
+  border-radius: 3px;
+  fill: none;
+  stroke: none;
+  stroke-linecap: butt;
+  box-shadow: 0 0 0 1px rgba(30, 22, 56, 0.14);
+  opacity: 0.6;
+  transition: opacity 0.12s, transform 0.12s;
+}
+
+.app-language button:hover svg,
+.app-language button:focus-visible svg {
+  opacity: 1;
 }
 
 .app-language button[aria-pressed='true'] {
-  color: white;
-  background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent-light);
+}
+
+.app-language button[aria-pressed='true'] svg {
+  opacity: 1;
+  transform: scale(1.08);
 }
 
 .hero {
