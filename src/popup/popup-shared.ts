@@ -72,8 +72,6 @@ async function refreshPopupAuth(): Promise<void> {
 
 // --- Backend results ------------------------------------------------------------
 
-const POPUP_UNREACHABLE_TEXT = 'Lamiss can\'t be reached right now. Check your connection and try again.';
-
 // What to tell the user about a failed call. A 401 already ended the stored
 // session (callLamiss); the popup then shows its sign-in again.
 function describePopupFailure(result: { ok: false; status?: number; error: string; signInRequired?: boolean }): string {
@@ -82,7 +80,7 @@ function describePopupFailure(result: { ok: false; status?: number; error: strin
     return result.error;
   }
   if (result.status === undefined) {
-    return POPUP_UNREACHABLE_TEXT;
+    return lamissT('popup.unreachable');
   }
   return result.error;
 }
@@ -100,15 +98,15 @@ function setPopupSaveState(element: HTMLElement, tone: PopupSaveTone, text?: str
   const errorLine = element.closest('.view')?.querySelector<HTMLElement>('[data-save-error]');
   if (errorLine) {
     errorLine.hidden = tone !== 'error';
-    errorLine.textContent = tone === 'error' ? `Not saved: ${text ?? 'please try again.'}` : '';
+    errorLine.textContent = tone === 'error' ? lamissT('save.notSavedBecause', { reason: text ?? lamissT('save.pleaseTryAgain') }) : '';
   }
   if (tone === 'saving') {
-    element.textContent = 'Saving…';
+    element.textContent = lamissT('save.saving');
   } else if (tone === 'saved') {
-    element.textContent = 'Saved';
+    element.textContent = lamissT('save.saved');
     popupSavedTimers.set(element, window.setTimeout(() => setPopupSaveState(element, 'idle'), 2000));
   } else if (tone === 'error') {
-    element.textContent = 'Not saved';
+    element.textContent = lamissT('save.notSaved');
     element.title = text ?? '';
   } else {
     element.textContent = '';
@@ -209,13 +207,17 @@ function renderPracticeProgress(
   parts.text.textContent = progress.text;
   parts.fill.style.width = `${Math.round(progress.fraction * 100)}%`;
   parts.container.dataset.done = String(progress.done);
-  parts.container.title = progress.done ? 'Daily goal reached' : '';
+  parts.container.title = progress.done ? lamissT('practice.reached') : '';
 }
 
 // --- Form helpers -------------------------------------------------------------------
 
+// Every language the backend knows, named in the app language and sorted in it.
 function fillLanguageSelect(select: HTMLSelectElement, emptyLabel: string, value: string | null): void {
-  select.replaceChildren(new Option(emptyLabel, ''), ...LAMISS_LANGUAGES.map(language => new Option(language.name, language.code)));
+  const options = LAMISS_LANGUAGES
+    .map(language => ({ code: language.code, label: lamissLanguageLabel(language.code) }))
+    .sort((a, b) => a.label.localeCompare(b.label, lamissAppLanguage));
+  select.replaceChildren(new Option(emptyLabel, ''), ...options.map(option => new Option(option.label, option.code)));
   select.value = value ?? '';
 }
 

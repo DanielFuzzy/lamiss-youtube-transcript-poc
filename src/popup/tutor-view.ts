@@ -1,5 +1,5 @@
-// Tutor Behavior: kindness, response length, encouragement, explanation
-// language and auto-pause (the user's preferences on the backend), and how often Lamiss asks
+// Tutor Behavior: kindness, response length, encouragement, the tutor
+// language (TDR-0003) and auto-pause (the user's preferences on the backend), and how often Lamiss asks
 // its own questions (lamissQuestionSettings, local; the worker sends it over
 // the live connection).
 
@@ -13,22 +13,21 @@ const tutorKindness = document.querySelector<HTMLElement>('[data-segment="kindne
 const tutorFrequency = document.querySelector<HTMLElement>('[data-segment="frequency"]')!;
 const tutorResponseLength = document.querySelector<HTMLElement>('[data-segment="responseLength"]')!;
 const tutorEncouragementInput = popupElement<HTMLInputElement>('encouragementInput');
-const tutorExplanationSelect = popupElement<HTMLSelectElement>('explanationSelect');
+const tutorLanguageSelect = popupElement<HTMLSelectElement>('tutorLanguageSelect');
 const tutorAutoPauseInput = popupElement<HTMLInputElement>('autoPauseInput');
 const tutorAutoPauseHint = popupElement<HTMLParagraphElement>('autoPauseHint');
 
 function renderTutorAutoPause(on: boolean): void {
   tutorAutoPauseInput.checked = on;
-  tutorAutoPauseHint.textContent = on
-    ? 'Lamiss will pause the video when asking you'
-    : 'The video keeps playing, quieter, while Lamiss asks you';
+  tutorAutoPauseHint.textContent = on ? lamissT('tutor.autoPauseOn') : lamissT('tutor.autoPauseOff');
 }
 
 function renderTutor(preferences: LamissPreferences): void {
   setSegmentValue(tutorKindness, preferences.tutor.kindness);
   setSegmentValue(tutorResponseLength, preferences.tutor.responseLength);
   tutorEncouragementInput.checked = preferences.tutor.encouragement;
-  fillLanguageSelect(tutorExplanationSelect, 'Video\'s language', preferences.tutor.explanationLanguage);
+  // Not chosen: the video's (caption) language, as before TDR-0003.
+  fillLanguageSelect(tutorLanguageSelect, lamissT('common.videosLanguage'), lamissTutorLanguage(preferences));
   // Not set (or an older backend) means on.
   renderTutorAutoPause(preferences.tutor.autoPause !== false);
 }
@@ -98,8 +97,12 @@ tutorAutoPauseInput.addEventListener('change', () => {
   void saveTutor({ autoPause: tutorAutoPauseInput.checked });
 });
 
-tutorExplanationSelect.addEventListener('change', () => {
-  void saveTutor({ explanationLanguage: tutorExplanationSelect.value || null });
+tutorLanguageSelect.addEventListener('change', async () => {
+  const tutorLanguage = tutorLanguageSelect.value || null;
+  const { error } = await savePopupPreferences(tutorSaveState, current => ({ ...current, tutorLanguage }));
+  if (error && popupPreferences) {
+    renderTutor(popupPreferences);
+  }
 });
 
 tutorRetryButton.addEventListener('click', () => void loadTutor());

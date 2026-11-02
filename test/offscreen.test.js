@@ -15,7 +15,7 @@ async function flush(rounds = 20) {
 function offscreenEnv() {
   // Synthesis answers 401, so speak() stops before it needs an <audio> element.
   return createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
     withoutSessionStorage: true,
     responder: async () => ({ status: 401, json: { detail: 'Unauthenticated' } })
   });
@@ -73,7 +73,7 @@ test('listen records with the chosen microphone, and falls back to the default w
   // The fallback is refused too, so listening stops before it needs audio analysis.
   const media = fakeMediaDevices([domError('OverconstrainedError'), domError('NotAllowedError')]);
   const env = createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
     withoutSessionStorage: true,
     globals: { navigator: { mediaDevices: media.mediaDevices } }
   });
@@ -92,7 +92,7 @@ test('listen records with the chosen microphone, and falls back to the default w
 test('listen without a chosen microphone uses the default one directly', async () => {
   const media = fakeMediaDevices([domError('NotAllowedError')]);
   const env = createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
     withoutSessionStorage: true,
     globals: { navigator: { mediaDevices: media.mediaDevices } }
   });
@@ -133,7 +133,7 @@ function fakeAudioClass(played, sinkResults = []) {
 function speakingEnv(played, sinkResults) {
   const Audio = fakeAudioClass(played, sinkResults);
   return createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
     withoutSessionStorage: true,
     responder: async () => ({ body: 'mp3-bytes' }),
     // setSinkId support is detected on the prototype.

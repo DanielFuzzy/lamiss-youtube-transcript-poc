@@ -68,12 +68,12 @@ function audioSinkSupported(): boolean {
 
 // --- Devices ------------------------------------------------------------------------
 
-function fillDeviceSelect(select: HTMLSelectElement, devices: MediaDeviceInfo[], fallbackName: string, selected: string | undefined): void {
+function fillDeviceSelect(select: HTMLSelectElement, devices: MediaDeviceInfo[], fallbackName: LamissMessageKey, selected: string | undefined): void {
   // "default" and "communications" are Chrome's aliases of real devices.
   const real = devices.filter(device => device.deviceId && device.deviceId !== 'default' && device.deviceId !== 'communications');
   select.replaceChildren(
-    new Option('System default', ''),
-    ...real.map((device, index) => new Option(device.label || `${fallbackName} ${index + 1}`, device.deviceId))
+    new Option(lamissT('audio.systemDefault'), ''),
+    ...real.map((device, index) => new Option(device.label || lamissT(fallbackName, { number: index + 1 }), device.deviceId))
   );
   // A device that is gone (or not listed without permission) shows as the default.
   select.value = selected && real.some(device => device.deviceId === selected) ? selected : '';
@@ -88,7 +88,7 @@ async function loadAudioDevices(): Promise<void> {
     audioMicSelect.disabled = true;
     audioSpeakerSelect.disabled = true;
     audioMicTestButton.disabled = true;
-    setAudioMessage(audioMicMessage, 'This browser doesn\'t let Lamiss list your devices; it uses the default ones.', 'error');
+    setAudioMessage(audioMicMessage, lamissT('audio.noDeviceList'), 'error');
     return;
   }
 
@@ -104,8 +104,8 @@ async function loadAudioDevices(): Promise<void> {
   const permitted = inputs.some(device => device.label);
   audioMicPermission.hidden = permitted;
 
-  fillDeviceSelect(audioMicSelect, permitted ? inputs : [], 'Microphone', settings.micDeviceId);
-  fillDeviceSelect(audioSpeakerSelect, permitted ? outputs : [], 'Speaker', settings.speakerDeviceId);
+  fillDeviceSelect(audioMicSelect, permitted ? inputs : [], 'audio.micName', settings.micDeviceId);
+  fillDeviceSelect(audioSpeakerSelect, permitted ? outputs : [], 'audio.speakerName', settings.speakerDeviceId);
 
   const sinkSupported = audioSinkSupported();
   audioSpeakerSelect.disabled = !sinkSupported;
@@ -115,12 +115,12 @@ async function loadAudioDevices(): Promise<void> {
 audioMicSelect.addEventListener('change', async () => {
   stopAudioMicTest();
   await saveDeviceSettings({ micDeviceId: audioMicSelect.value || undefined });
-  setAudioMessage(audioMicMessage, 'Lamiss will listen with this microphone.', 'ok');
+  setAudioMessage(audioMicMessage, lamissT('audio.micChosen'), 'ok');
 });
 
 audioSpeakerSelect.addEventListener('change', async () => {
   await saveDeviceSettings({ speakerDeviceId: audioSpeakerSelect.value || undefined });
-  setAudioMessage(audioSpeakerMessage, 'Lamiss will speak on this speaker.', 'ok');
+  setAudioMessage(audioSpeakerMessage, lamissT('audio.speakerChosen'), 'ok');
 });
 
 // The popup can't always show Chrome's microphone prompt; a regular extension
@@ -148,7 +148,7 @@ function stopAudioMicTest(): void {
   const test = audioMicTest;
   audioMicTest = undefined;
   audioMicTestButton.dataset.active = 'false';
-  audioMicTestButton.querySelector('span')!.textContent = 'Test microphone';
+  audioMicTestButton.querySelector('span')!.textContent = lamissT('audio.testMic');
   renderAudioMeter(0);
   if (!test) {
     return;
@@ -160,7 +160,7 @@ function stopAudioMicTest(): void {
 }
 
 async function startAudioMicTest(): Promise<void> {
-  setAudioMessage(audioMicMessage, 'Opening the microphone…');
+  setAudioMessage(audioMicMessage, lamissT('common.openingMic'));
   let stream: MediaStream;
   try {
     stream = await getMicrophoneStream(audioMicSelect.value || undefined);
@@ -168,13 +168,13 @@ async function startAudioMicTest(): Promise<void> {
     const name = error instanceof DOMException ? error.name : '';
     if (name === 'NotAllowedError' || name === 'SecurityError') {
       audioMicPermission.hidden = false;
-      setAudioMessage(audioMicMessage, 'Lamiss isn\'t allowed to use the microphone yet. Click "Allow microphone" above.', 'error');
+      setAudioMessage(audioMicMessage, lamissT('audio.micNotAllowed'), 'error');
     } else if (name === 'NotFoundError') {
-      setAudioMessage(audioMicMessage, 'No microphone was found. Plug one in and try again.', 'error');
+      setAudioMessage(audioMicMessage, lamissT('audio.noMic'), 'error');
     } else if (name === 'NotReadableError') {
-      setAudioMessage(audioMicMessage, 'The microphone is busy in another app. Close it there and try again.', 'error');
+      setAudioMessage(audioMicMessage, lamissT('audio.micBusy'), 'error');
     } else {
-      setAudioMessage(audioMicMessage, 'The microphone could not be opened.', 'error');
+      setAudioMessage(audioMicMessage, lamissT('common.micFailed'), 'error');
     }
     return;
   }
@@ -194,8 +194,8 @@ async function startAudioMicTest(): Promise<void> {
   const test: AudioMicTest = { stream, context, frame: 0, stopTimer: 0 };
   audioMicTest = test;
   audioMicTestButton.dataset.active = 'true';
-  audioMicTestButton.querySelector('span')!.textContent = 'Stop test';
-  setAudioMessage(audioMicMessage, 'Say something: the bars should move.');
+  audioMicTestButton.querySelector('span')!.textContent = lamissT('audio.stopTest');
+  setAudioMessage(audioMicMessage, lamissT('audio.saySomething'));
   // Labels appear once the permission is granted.
   if (!audioMicPermission.hidden) {
     void loadAudioDevices();
@@ -214,9 +214,9 @@ async function startAudioMicTest(): Promise<void> {
     renderAudioMeter(level);
     if (level > AUDIO_SILENT_LEVEL && !heardSomething) {
       heardSomething = true;
-      setAudioMessage(audioMicMessage, 'Lamiss can hear you.', 'ok');
+      setAudioMessage(audioMicMessage, lamissT('audio.canHear'), 'ok');
     } else if (!heardSomething && Date.now() - startedAt > AUDIO_SILENT_HINT_MS) {
-      setAudioMessage(audioMicMessage, 'Lamiss can\'t hear anything. Is the right microphone selected and unmuted?', 'error');
+      setAudioMessage(audioMicMessage, lamissT('audio.cantHear'), 'error');
     }
     test.frame = requestAnimationFrame(tick);
   };
@@ -296,10 +296,10 @@ function makeAudioTestTone(): Blob {
 audioSpeakerTestButton.addEventListener('click', async () => {
   try {
     await playAudioSample(makeAudioTestTone());
-    setAudioMessage(audioSpeakerMessage, 'Playing a test sound. Didn\'t hear it? Try another speaker or turn the volume up.');
+    setAudioMessage(audioSpeakerMessage, lamissT('audio.playingTest'));
   } catch (error) {
     console.error('Lamiss POC: test sound failed:', error);
-    setAudioMessage(audioSpeakerMessage, 'The test sound could not be played.', 'error');
+    setAudioMessage(audioSpeakerMessage, lamissT('audio.testFailed'), 'error');
   }
 });
 
@@ -345,10 +345,10 @@ function renderAudioVoices(list: LamissVoiceList, preferences: LamissPreferences
     const only = list.voices[0];
     audioVoiceSelect.hidden = true;
     audioVoiceReadOnly.hidden = false;
-    audioVoiceReadOnly.textContent = only ? `${only.label} (${list.provider})` : `The ${list.provider} voice`;
+    audioVoiceReadOnly.textContent = only ? `${only.label} (${list.provider})` : lamissT('audio.providerVoice', { provider: list.provider });
     // Nor can its speed be changed (TDR-0002): no slider that does nothing.
     audioSpeedInput.disabled = true;
-    audioVoiceHint.textContent = 'Your Lamiss server uses this one voice for every language, at its own speed.';
+    audioVoiceHint.textContent = lamissT('audio.oneVoice');
     return;
   }
 
@@ -357,29 +357,27 @@ function renderAudioVoices(list: LamissVoiceList, preferences: LamissPreferences
   const offered = voicesForLanguage(list.voices, learning);
   const options: Array<HTMLOptionElement | HTMLOptGroupElement> = [];
   const defaultVoice = learning ? offered.find(voice => voice.default) : undefined;
-  options.push(new Option(defaultVoice ? `Default voice (${defaultVoice.label})` : 'Default voice for each language', ''));
+  options.push(new Option(defaultVoice ? lamissT('audio.defaultVoiceNamed', { name: defaultVoice.label }) : lamissT('audio.defaultVoiceEach'), ''));
   if (learning) {
     options.push(...offered.map(voice => new Option(voice.label, voice.id)));
-    audioVoiceHint.textContent = offered.length > 0
-      ? `Voices for ${lamissLanguageName(learning)}, the language you're learning.`
-      : `There are no other voices for ${lamissLanguageName(learning)} yet.`;
+    audioVoiceHint.textContent = lamissT(offered.length > 0 ? 'audio.voicesFor' : 'audio.noVoicesFor', { language: lamissLanguageName(learning) });
   } else {
     const languages = [...new Set(offered.map(voice => voice.language))]
-      .sort((a, b) => lamissLanguageName(a).localeCompare(lamissLanguageName(b)));
+      .sort((a, b) => lamissLanguageLabel(a).localeCompare(lamissLanguageLabel(b), lamissAppLanguage));
     for (const language of languages) {
       const group = document.createElement('optgroup');
-      group.label = lamissLanguageName(language);
+      group.label = lamissLanguageLabel(language);
       group.append(...offered.filter(voice => voice.language === language).map(voice => new Option(voice.label, voice.id)));
       options.push(group);
     }
-    audioVoiceHint.textContent = 'Set the language you\'re learning in Profile & Account to see just its voices.';
+    audioVoiceHint.textContent = lamissT('audio.setLearningLanguage');
   }
   audioVoiceSelect.replaceChildren(...options);
   const saved = preferences.voice.voiceId;
   if (saved && !offered.some(voice => voice.id === saved)) {
     // A voice of another language: keep it visible rather than dropping it.
     const voice = list.voices.find(candidate => candidate.id === saved);
-    audioVoiceSelect.append(new Option(voice ? `${voice.label} (${lamissLanguageName(voice.language)})` : saved, saved));
+    audioVoiceSelect.append(new Option(voice ? `${voice.label} (${lamissLanguageLabel(voice.language)})` : saved, saved));
   }
   audioVoiceSelect.value = saved ?? '';
 }
@@ -395,7 +393,7 @@ async function loadAudioVoices(): Promise<void> {
   setAudioMessage(audioVoiceMessage, '');
   audioVoiceSelect.hidden = false;
   audioVoiceReadOnly.hidden = true;
-  audioVoiceSelect.replaceChildren(new Option('Loading voices…', ''));
+  audioVoiceSelect.replaceChildren(new Option(lamissT('audio.loadingVoices'), ''));
 
   const [voices, preferences] = await Promise.all([fetchVoices(), loadPopupPreferences()]);
   if (popupCurrentView !== 'audio') {
@@ -403,7 +401,7 @@ async function loadAudioVoices(): Promise<void> {
   }
   const failed = !voices.ok ? voices : !preferences.ok ? preferences : undefined;
   if (failed && !failed.ok) {
-    audioVoiceSelect.replaceChildren(new Option('Voices unavailable', ''));
+    audioVoiceSelect.replaceChildren(new Option(lamissT('audio.voicesUnavailable'), ''));
     audioVoiceHint.textContent = '';
     setAudioMessage(audioVoiceMessage, describePopupFailure(failed), 'error');
     return;
@@ -440,7 +438,7 @@ audioSpeedInput.addEventListener('change', () => {
 // The backend speaks with the saved voice and speed, so they are saved first.
 audioVoicePreviewButton.addEventListener('click', async () => {
   audioVoicePreviewButton.disabled = true;
-  setAudioMessage(audioVoiceMessage, 'Lamiss is getting ready to speak…');
+  setAudioMessage(audioVoiceMessage, lamissT('audio.gettingReadyToSpeak'));
   window.clearTimeout(audioSpeedTimer);
   const voiceId = audioVoiceSelect.hidden ? undefined : audioVoiceSelect.value || null;
   const speed = Number(audioSpeedInput.value);
@@ -450,7 +448,7 @@ audioVoicePreviewButton.addEventListener('click', async () => {
   }));
   if (!saved) {
     audioVoicePreviewButton.disabled = false;
-    setAudioMessage(audioVoiceMessage, error ?? 'Could not save the voice.', 'error');
+    setAudioMessage(audioVoiceMessage, error ?? lamissT('audio.couldNotSaveVoice'), 'error');
     return;
   }
 
@@ -466,10 +464,10 @@ audioVoicePreviewButton.addEventListener('click', async () => {
   }
   try {
     await playAudioSample(result.data);
-    setAudioMessage(audioVoiceMessage, language === wanted ? 'Playing a preview of this voice.' : `There's no ${lamissLanguageName(wanted)} preview yet, so this one is in English.`);
+    setAudioMessage(audioVoiceMessage, language === wanted ? lamissT('audio.playingPreview') : lamissT('audio.noPreviewFor', { language: lamissLanguageName(wanted) }));
   } catch (playError) {
     console.error('Lamiss POC: voice preview failed:', playError);
-    setAudioMessage(audioVoiceMessage, 'The preview could not be played.', 'error');
+    setAudioMessage(audioVoiceMessage, lamissT('audio.previewFailed'), 'error');
   }
 });
 

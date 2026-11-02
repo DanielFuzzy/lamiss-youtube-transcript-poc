@@ -23,7 +23,7 @@ function contentEnv(href = WATCH_URL) {
     querySelectorAll: () => []
   };
   return createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js', 'content/youtube.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'content/youtube.js'],
     withoutSessionStorage: true,
     globals: {
       window: { ...listeners(), location: { href } },

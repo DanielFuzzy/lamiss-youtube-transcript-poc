@@ -50,6 +50,7 @@
       ],
       "js": [
         "shared/lamiss-config.js",
+        "shared/lamiss-i18n.js",
         "shared/lamiss-api.js",
         "content/youtube.js"
       ],

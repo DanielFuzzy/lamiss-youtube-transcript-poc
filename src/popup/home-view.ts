@@ -25,7 +25,7 @@ let homeSignInBusy = false;
 let homeTabId: number | undefined;
 let homePageState: string | undefined;
 // Why Start Learning can't run right now, under its label.
-let homeStartBlocked = 'Open a YouTube video first';
+let homeStartBlocked: LamissMessageKey = 'home.openVideoFirst';
 // Bumped by every status check; an older one stops writing.
 let homeStatusGeneration = 0;
 
@@ -37,19 +37,20 @@ function setHomeStatus(tone: HomeStatusTone, text: string): void {
 function renderHomeAccount(detail?: { text: string; error?: boolean }): void {
   const signedIn = popupSignedIn();
   homeSignInCard.hidden = signedIn;
-  homeSignInTitle.textContent = popupAuthState.status === 'expired' ? 'Your session ended' : 'Sign in to start learning';
-  homeSignInDetail.textContent = detail?.text ?? (popupAuthState.status === 'expired'
-    ? 'Please sign in again to keep learning with Lamiss.'
-    : 'Lamiss keeps your settings and progress with your Google account.');
+  homeSignInTitle.textContent = lamissT(popupAuthState.status === 'expired' ? 'home.sessionEnded' : 'home.signInTitle');
+  homeSignInDetail.textContent = detail?.text ?? lamissT(popupAuthState.status === 'expired'
+    ? 'home.signInAgainDetail'
+    : 'home.signInDetail');
   homeSignInDetail.classList.toggle('error', detail?.error === true);
   homeSignInButton.disabled = homeSignInBusy;
-  homeSignInButton.textContent = homeSignInBusy ? 'Signing in…' : 'Sign in with Google';
+  homeSignInButton.textContent = lamissT(homeSignInBusy ? 'common.signingIn' : 'common.signInWithGoogle');
 
   for (const card of document.querySelectorAll<HTMLButtonElement>('.category[data-needs-account]')) {
     card.disabled = !signedIn;
     const detailText = card.querySelector<HTMLElement>('.category-detail');
     if (detailText) {
-      detailText.textContent = signedIn ? detailText.dataset.signedInText ?? '' : 'Sign in to change this';
+      const signedInKey = detailText.dataset.signedInKey as LamissMessageKey | undefined;
+      detailText.textContent = signedIn ? (signedInKey ? lamissT(signedInKey) : '') : lamissT('home.signInToChange');
     }
   }
 }
@@ -58,11 +59,11 @@ function renderHomeStart(): void {
   const ready = homePageState === 'ready';
   const loading = homePageState === 'loading';
   homeStartButton.disabled = !popupSignedIn() || homeTabId === undefined || loading;
-  homeStartLabel.textContent = ready ? 'Open the chat' : loading ? 'Getting ready…' : 'Start Learning';
-  homeStartDetail.textContent = !popupSignedIn()
-    ? 'Sign in first'
-    : ready ? 'Lamiss is already with you on this video'
-      : homeTabId === undefined ? homeStartBlocked : 'Lamiss will join this video';
+  homeStartLabel.textContent = lamissT(ready ? 'home.openChat' : loading ? 'home.gettingReady' : 'home.start');
+  homeStartDetail.textContent = lamissT(!popupSignedIn()
+    ? 'home.signInFirst'
+    : ready ? 'home.alreadyHere'
+      : homeTabId === undefined ? homeStartBlocked : 'home.willJoin');
 }
 
 type HomeActiveVideo = { tabId: number; videoId: string };
@@ -92,14 +93,14 @@ function readHomePageStatus(tabId: number): Promise<LamissPageStatus | undefined
   return chrome.tabs.sendMessage(tabId, { type: LAMISS_PAGE_STATUS_MESSAGE }) as Promise<LamissPageStatus | undefined>;
 }
 
-const HOME_PAGE_STATUS_TEXT: Record<string, { tone: HomeStatusTone; text: string }> = {
-  idle: { tone: 'ready', text: 'Ready on this video (YouTube)' },
-  ready: { tone: 'ready', text: 'Lamiss is learning with you on this video' },
-  loading: { tone: 'busy', text: 'Getting Lamiss ready on this video…' },
-  error: { tone: 'error', text: 'Lamiss had a problem on this video. Try Start Learning again.' },
+const HOME_PAGE_STATUS_TEXT: Record<string, { tone: HomeStatusTone; text: LamissMessageKey }> = {
+  idle: { tone: 'ready', text: 'home.statusIdle' },
+  ready: { tone: 'ready', text: 'home.statusReady' },
+  loading: { tone: 'busy', text: 'home.statusLoading' },
+  error: { tone: 'error', text: 'home.statusError' },
   // The page hasn't seen the sign-in yet; it catches up by itself.
-  'signed-out': { tone: 'ready', text: 'Ready on this video (YouTube)' },
-  'signing-in': { tone: 'busy', text: 'Signing in…' }
+  'signed-out': { tone: 'ready', text: 'home.statusIdle' },
+  'signing-in': { tone: 'busy', text: 'common.signingIn' }
 };
 
 async function refreshHomeStatus(): Promise<void> {
@@ -107,9 +108,9 @@ async function refreshHomeStatus(): Promise<void> {
   const current = () => generation === homeStatusGeneration;
   homeTabId = undefined;
   homePageState = undefined;
-  homeStartBlocked = 'Checking this tab…';
+  homeStartBlocked = 'home.checkingTab';
   renderHomeStart();
-  const blocked = (tone: HomeStatusTone, text: string, startDetail: string) => {
+  const blocked = (tone: HomeStatusTone, text: string, startDetail: LamissMessageKey) => {
     homeStartBlocked = startDetail;
     setHomeStatus(tone, text);
     renderHomeStart();
@@ -117,11 +118,11 @@ async function refreshHomeStatus(): Promise<void> {
 
   if (!popupSignedIn()) {
     renderPracticeProgress(homeProgressParts, undefined);
-    setHomeStatus('attention', popupAuthState.status === 'expired' ? 'Your session ended. Sign in again to continue.' : 'Sign in to start learning');
+    setHomeStatus('attention', lamissT(popupAuthState.status === 'expired' ? 'home.statusSessionEnded' : 'home.signInTitle'));
     return;
   }
 
-  setHomeStatus('busy', 'Checking Lamiss…');
+  setHomeStatus('busy', lamissT('home.checking'));
   const [profile, video] = await Promise.all([loadPopupProfile(), readHomeActiveVideo()]);
   if (!current()) {
     return;
@@ -131,7 +132,7 @@ async function refreshHomeStatus(): Promise<void> {
       void refreshPopupAuth();
       return;
     }
-    blocked('error', profile.status === undefined ? 'Lamiss can\'t be reached right now' : `Lamiss isn't available: ${profile.error}`, 'Lamiss isn\'t reachable right now');
+    blocked('error', profile.status === undefined ? lamissT('home.statusCantReach') : lamissT('home.statusUnavailable', { error: profile.error }), 'home.startUnreachable');
     return;
   }
   // The daily goal line, alongside the tab checks; hidden when there is no goal.
@@ -141,7 +142,7 @@ async function refreshHomeStatus(): Promise<void> {
     }
   });
   if (!video) {
-    blocked('attention', 'Open a YouTube video to start learning', 'Open a YouTube video first');
+    blocked('attention', lamissT('home.statusOpenVideo'), 'home.openVideoFirst');
     return;
   }
 
@@ -155,14 +156,14 @@ async function refreshHomeStatus(): Promise<void> {
     return;
   }
   if (!page) {
-    blocked('attention', 'Reload the YouTube tab to use Lamiss there', 'Reload the YouTube tab first');
+    blocked('attention', lamissT('home.statusReloadTab'), 'home.startReloadTab');
     return;
   }
 
   homeTabId = video.tabId;
   homePageState = page.buttonState;
   const status = HOME_PAGE_STATUS_TEXT[page.buttonState] ?? HOME_PAGE_STATUS_TEXT.idle;
-  setHomeStatus(status.tone, status.text);
+  setHomeStatus(status.tone, lamissT(status.text));
   renderHomeStart();
 }
 
@@ -174,11 +175,11 @@ homeStartButton.addEventListener('click', async () => {
   try {
     // The page runs the same flow as its own Lamiss button.
     await chrome.tabs.sendMessage(homeTabId, { type: LAMISS_START_LEARNING_MESSAGE });
-    setHomeStatus('busy', homePageState === 'ready' ? 'Opening the chat…' : 'Lamiss is joining this video…');
+    setHomeStatus('busy', lamissT(homePageState === 'ready' ? 'home.statusOpeningChat' : 'home.statusJoining'));
     // The video page shows the progress and the chat from here on.
     window.setTimeout(() => window.close(), 700);
   } catch {
-    setHomeStatus('attention', 'Reload the YouTube tab to use Lamiss there');
+    setHomeStatus('attention', lamissT('home.statusReloadTab'));
     renderHomeStart();
   }
 });
@@ -188,14 +189,14 @@ homeSignInButton.addEventListener('click', async () => {
     return;
   }
   homeSignInBusy = true;
-  renderHomeAccount({ text: 'Continue in the Google window' });
+  renderHomeAccount({ text: lamissT('common.continueInGoogle') });
   // The worker runs the sign-in, so it finishes even if this popup closes.
   const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
     .catch((error: unknown): LamissSignInResult => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
   homeSignInBusy = false;
   await refreshPopupAuth();
   if (!result?.ok) {
-    renderHomeAccount({ text: result?.error ?? 'Sign-in failed. Please try again.', error: result?.reason !== 'cancelled' });
+    renderHomeAccount({ text: result?.error ?? lamissT('common.signInFailed'), error: result?.reason !== 'cancelled' });
   }
 });
 

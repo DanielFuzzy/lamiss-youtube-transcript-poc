@@ -62,6 +62,7 @@ const user = { id: 7, email: 'daniel@example.com', username: 'daniel', displayNa
 let preferences = {
   nativeLanguage: 'es',
   learningLanguage: 'en',
+  tutorLanguage: null,
   proficiencyLevel: 'B1',
   learningGoal: null,
   dailyGoalMinutes: null,
@@ -316,6 +317,23 @@ async function main() {
     check(await popup.locator('#startButton').isEnabled(), 'home: Start Learning is enabled');
     await shot('02-home');
 
+    // App language (TDR-0003): one click switches the whole popup; nothing goes to the backend.
+    const putsBeforeLanguage = backendCalls.filter(call => call.call === 'PUT /api/me/preferences').length;
+    check(await popup.locator('#appLanguagePicker button').count() === 5, 'app language: five quick choices');
+    check(await popup.locator('#appLanguagePicker button[aria-pressed="true"]').getAttribute('data-language') === 'en', 'app language: English by default');
+    await popup.locator('#appLanguagePicker button[data-language="es"]').click();
+    await popup.waitForFunction(() => document.documentElement.lang === 'es');
+    check(await popup.locator('#startLabel').textContent() === 'Empezar a aprender', 'app language: Start Learning in Spanish');
+    check(await popup.locator('.category[data-open="audio"] .category-title').textContent() === 'Audio y voz', 'app language: the categories in Spanish');
+    check((await popup.locator('#statusText').textContent()).includes('Listo en este vídeo'), 'app language: the status line in Spanish');
+    await shot('02b-home-spanish');
+    await popup.reload();
+    await popup.waitForSelector('#statusDot[data-tone="ready"]', { timeout: 10000 });
+    check(await popup.locator('.hero-tagline').textContent() === 'Tu tutor de idiomas con IA', 'app language: kept after reopening');
+    await popup.locator('#appLanguagePicker button[data-language="en"]').click();
+    await popup.waitForFunction(() => document.documentElement.lang === 'en');
+    check(backendCalls.filter(call => call.call === 'PUT /api/me/preferences').length === putsBeforeLanguage, 'app language: not a backend preference');
+
     // Double Captions.
     await popup.locator('.category[data-open="captions"]').click();
     check(await view('captions').locator('.badge').isVisible(), 'captions: shows Coming soon');
@@ -373,9 +391,9 @@ async function main() {
     await popup.waitForTimeout(200);
     const questions = await popup.evaluate(async () => (await chrome.storage.local.get('lamissQuestionSettings')).lamissQuestionSettings);
     check(questions?.minSecondsBetweenQuestions === 60 && questions.difficulty === 'MEDIUM', `tutor: More questions = 60 s, difficulty untouched (${JSON.stringify(questions)})`);
-    await popup.locator('#explanationSelect').selectOption('es');
+    await popup.locator('#tutorLanguageSelect').selectOption('es');
     await popup.waitForSelector('#tutorSaveState[data-tone="saved"]');
-    check(preferences.tutor.explanationLanguage === 'es', 'tutor: explanation language saved');
+    check(preferences.tutorLanguage === 'es' && preferences.learningLanguage === 'en', 'tutor: tutor language saved apart from the learning language');
     check(await popup.locator('#autoPauseInput').isChecked(), 'tutor: auto-pause shows on (not set reads back true)');
     await popup.locator('#autoPauseInput').click();
     await popup.waitForSelector('#tutorSaveState[data-tone="saved"]');
@@ -492,7 +510,8 @@ async function main() {
       && ['SHORT', 'NORMAL', 'DETAILED'].includes(body.tutor.responseLength)
       && typeof body.tutor.encouragement === 'boolean'
       && typeof body.voice.speed === 'number' && body.voice.speed >= 0.5 && body.voice.speed <= 2
-      && code(body.nativeLanguage) && code(body.learningLanguage) && code(body.tutor.explanationLanguage)
+      && code(body.nativeLanguage) && code(body.learningLanguage) && code(body.tutorLanguage)
+      && !('explanationLanguage' in body.tutor)
       && (body.proficiencyLevel === null || /^[ABC][12]$/.test(body.proficiencyLevel))
       && (body.learningGoal == null || ['CONVERSATION', 'VOCABULARY', 'GRAMMAR', 'LISTENING', 'PRONUNCIATION'].includes(body.learningGoal))
       && (body.dailyGoalMinutes == null || (Number.isInteger(body.dailyGoalMinutes) && body.dailyGoalMinutes >= 5 && body.dailyGoalMinutes <= 240))
