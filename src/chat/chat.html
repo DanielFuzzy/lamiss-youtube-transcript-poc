@@ -1,10 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lamiss-i18n="pending">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lamiss Chat</title>
   <style>
+    /* Until the saved app language is applied (chat.ts). */
+    html[data-lamiss-i18n="pending"] body {
+      visibility: hidden;
+    }
+
     :root {
       --bg: #12081f;
       --surface: rgba(39, 23, 66, 0.72);
@@ -459,9 +464,9 @@
     <div class="logo" aria-hidden="true"><img src="../brand/lamiss-mark-small.svg" alt="" /></div>
     <div class="title">
       <h1>Lamiss</h1>
-      <p id="sessionStatus" aria-live="polite">Starting your session…</p>
+      <p id="sessionStatus" aria-live="polite"></p>
     </div>
-    <button id="settingsButton" class="icon-button" type="button" aria-expanded="false" aria-controls="settings" aria-label="Question settings" title="Question settings">
+    <button id="settingsButton" class="icon-button" type="button" aria-expanded="false" aria-controls="settings" aria-label="Question settings" title="Question settings" data-i18n-attr="aria-label:chat.questionSettings;title:chat.questionSettings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
         <line x1="4" y1="7" x2="20" y2="7" />
         <line x1="4" y1="17" x2="20" y2="17" />
@@ -469,7 +474,7 @@
         <circle cx="15" cy="17" r="2.4" fill="var(--bg)" />
       </svg>
     </button>
-    <button id="closeButton" class="icon-button" type="button" aria-label="Hide the Lamiss chat" title="Hide the Lamiss chat">
+    <button id="closeButton" class="icon-button" type="button" aria-label="Hide the Lamiss chat" title="Hide the Lamiss chat" data-i18n-attr="aria-label:chat.hide;title:chat.hide">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
         <line x1="6" y1="6" x2="18" y2="18" />
         <line x1="18" y1="6" x2="6" y2="18" />
@@ -477,41 +482,41 @@
     </button>
   </header>
 
-  <section id="settings" class="settings" hidden aria-label="Lamiss's questions">
-    <p class="settings-title">Lamiss's questions</p>
+  <section id="settings" class="settings" hidden aria-label="Lamiss's questions" data-i18n-attr="aria-label:common.lamissQuestions">
+    <p class="settings-title" data-i18n="common.lamissQuestions">Lamiss's questions</p>
     <div class="setting">
       <div class="setting-row">
-        <label for="amountInput">How many</label>
+        <label for="amountInput" data-i18n="chat.howMany">How many</label>
         <output id="amountValue" for="amountInput"></output>
       </div>
       <input id="amountInput" type="range" min="0" max="8" step="1" />
-      <div class="setting-scale" aria-hidden="true"><span>Fewer</span><span>More</span></div>
+      <div class="setting-scale" aria-hidden="true"><span data-i18n="common.fewer">Fewer</span><span data-i18n="common.more">More</span></div>
     </div>
     <div class="setting">
       <div class="setting-row">
-        <label for="difficultyInput">Difficulty</label>
+        <label for="difficultyInput" data-i18n="common.difficulty">Difficulty</label>
         <output id="difficultyValue" for="difficultyInput"></output>
       </div>
       <input id="difficultyInput" type="range" min="0" max="2" step="1" />
-      <div class="setting-scale" aria-hidden="true"><span>Easy</span><span>Hard</span></div>
+      <div class="setting-scale" aria-hidden="true"><span data-i18n="common.easy">Easy</span><span data-i18n="common.hard">Hard</span></div>
     </div>
-    <p class="setting-hint">Lamiss only asks about parts of the video you've already watched. Changes apply right away.</p>
+    <p class="setting-hint" data-i18n="chat.settingsHint">Lamiss only asks about parts of the video you've already watched. Changes apply right away.</p>
   </section>
 
-  <div id="messages" role="log" aria-live="polite" aria-label="Conversation with Lamiss">
+  <div id="messages" role="log" aria-live="polite" aria-label="Conversation with Lamiss" data-i18n-attr="aria-label:chat.conversation">
     <div id="signIn" class="sign-in" hidden>
-      <p class="sign-in-title">Sign in to use Lamiss</p>
+      <p class="sign-in-title" data-i18n="chat.signInTitle">Sign in to use Lamiss</p>
       <p id="signInDetail" class="sign-in-detail">Your conversations are saved to your Lamiss account.</p>
       <button id="signInButton" class="sign-in-button" type="button">Sign in with Google</button>
     </div>
-    <p class="note">Ask Lamiss anything about this video. Your question is tied to the moment you ask it. Lamiss's questions and your answers show up here too.</p>
+    <p class="note" data-i18n="chat.note">Ask Lamiss anything about this video. Your question is tied to the moment you ask it. Lamiss's questions and your answers show up here too.</p>
     <div id="log"></div>
     <div id="pending"></div>
   </div>
 
   <form id="composer">
-    <label for="questionInput" class="visually-hidden">Your question</label>
-    <textarea id="questionInput" rows="1" placeholder="Ask about this video…" disabled></textarea>
+    <label for="questionInput" class="visually-hidden" data-i18n="chat.yourQuestion">Your question</label>
+    <textarea id="questionInput" rows="1" placeholder="Ask about this video…" data-i18n-attr="placeholder:chat.placeholder" disabled></textarea>
     <button id="micButton" class="round" type="button" data-state="idle" aria-label="Ask with your voice" title="Ask with your voice" disabled>
       <svg class="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect x="9" y="2" width="6" height="12" rx="3" />
@@ -522,7 +527,7 @@
         <rect x="6" y="6" width="12" height="12" rx="2.5" />
       </svg>
     </button>
-    <button id="sendButton" class="round" type="submit" aria-label="Send question" title="Send" disabled>
+    <button id="sendButton" class="round" type="submit" aria-label="Send question" title="Send" data-i18n-attr="aria-label:chat.sendQuestion;title:chat.send" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <line x1="12" y1="19" x2="12" y2="5" />
         <polyline points="5 12 12 5 19 12" />
@@ -531,6 +536,7 @@
   </form>
 
   <script src="../shared/lamiss-config.js"></script>
+  <script src="../shared/lamiss-i18n.js"></script>
   <script src="../shared/lamiss-api.js"></script>
   <script src="../shared/lamiss-auth.js"></script>
   <script src="chat.js"></script>

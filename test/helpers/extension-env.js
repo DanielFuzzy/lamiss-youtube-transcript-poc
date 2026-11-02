@@ -228,7 +228,7 @@ function createExtensionEnv(options = {}) {
     }
   };
 
-  context.importScripts(...(options.scripts ?? ['shared/lamiss-config.js', 'shared/lamiss-api.js', 'shared/lamiss-auth.js']));
+  context.importScripts(...(options.scripts ?? ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'shared/lamiss-auth.js']));
 
   // Delivers a message the way chrome.runtime.onMessage does: every listener
   // sees it; the first sendResponse wins.

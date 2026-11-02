@@ -67,12 +67,15 @@ test('preferences: GET and PUT carry the token and the full object', async () =>
 
   const changed = { ...preferences, tutor: { ...preferences.tutor, kindness: 'STRICT' } };
   env.context.changed = changed;
+  // Sent as tutorLanguage only (TDR-0003): explanationLanguage stays out of the PUT.
+  const { explanationLanguage: _legacy, ...tutor } = changed.tutor;
+  const sent = { ...changed, tutorLanguage: null, tutor };
   const saved = plain(await env.run('savePreferences(changed)'));
-  assert.deepEqual(saved, { ok: true, data: changed });
+  assert.deepEqual(saved, { ok: true, data: sent });
   const put = env.fetchCalls[1];
   assert.equal(put.init.method, 'PUT');
   assert.equal(put.headers.get('content-type'), 'application/json');
-  assert.deepEqual(JSON.parse(put.init.body), changed);
+  assert.deepEqual(JSON.parse(put.init.body), sent);
 });
 
 test('preferences: a 400 shows the backend message; a 401 asks to sign in again', async () => {

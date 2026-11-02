@@ -143,7 +143,7 @@ test('the public sign-in endpoints never get the token', async () => {
 test('a content-script context (no lamiss-auth.js, no session storage) is signed out', async () => {
   const env = createExtensionEnv({
     withoutSessionStorage: true,
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js'],
     responder: async () => ({ status: 401, json: { detail: 'Unauthenticated', errorCode: 'unauthenticated' } })
   });
   const result = await env.run('fetchSessionChat(42)');
@@ -182,7 +182,7 @@ test('failed calls log the status only, never bodies or tokens', async () => {
 
 test('speech synthesis uses the token it is given and stops on a 401', async () => {
   const env = createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js'],
     withoutSessionStorage: true,
     responder: async () => ({ status: 401, json: { detail: 'Unauthenticated' } })
   });
@@ -201,7 +201,7 @@ test('speech synthesis uses the token it is given and stops on a 401', async () 
 
 test('transcription uses the token it is given', async () => {
   const env = createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js'],
     withoutSessionStorage: true,
     responder: async () => ({ json: { text: 'hola', language: 'SPANISH' } })
   });

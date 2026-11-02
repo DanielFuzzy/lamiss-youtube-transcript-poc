@@ -32,4 +32,51 @@ chrome.runtime.onMessage.addListener((message: { type?: string } | undefined, se
   return false;
 });
 
-void refreshPopupAuth().then(() => showPopupView('home'));
+// --- App language (TDR-0003) ------------------------------------------------------
+
+const popupLanguagePicker = popupElement<HTMLDivElement>('appLanguagePicker');
+
+function createAppLanguagePicker(): void {
+  popupLanguagePicker.replaceChildren(...LAMISS_APP_LANGUAGES.map((language) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.lang = language.code;
+    button.dataset.language = language.code;
+    button.textContent = language.code.toUpperCase();
+    button.title = language.nativeName;
+    button.setAttribute('aria-label', language.nativeName);
+    button.addEventListener('click', () => {
+      if (language.code !== lamissAppLanguage) {
+        void saveAppLanguage(language.code);
+      }
+    });
+    return button;
+  }));
+  renderAppLanguagePicker();
+}
+
+function renderAppLanguagePicker(): void {
+  for (const button of popupLanguagePicker.querySelectorAll<HTMLButtonElement>('button[data-language]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.language === lamissAppLanguage));
+  }
+}
+
+// The static text changes at once; the view on screen renders again from
+// what it already loaded.
+onAppLanguageChange(() => {
+  applyLamissTranslations();
+  renderAppLanguagePicker();
+  popupViewHooks[popupCurrentView]?.enter?.();
+});
+
+void (async () => {
+  try {
+    await loadAppLanguage();
+    applyLamissTranslations();
+    createAppLanguagePicker();
+  } finally {
+    document.documentElement.removeAttribute('data-lamiss-i18n');
+  }
+  await refreshPopupAuth();
+  showPopupView('home');
+})();

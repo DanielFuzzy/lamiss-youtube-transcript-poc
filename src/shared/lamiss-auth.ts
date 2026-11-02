@@ -130,10 +130,10 @@ function parseAuthRedirect(redirectUrl: string, expected: { redirectUri: string;
 function describeAuthFlowError(error: unknown, interactive: boolean): { reason: LamissSignInFailure; error: string } {
   const message = error instanceof Error ? error.message : String(error);
   if (!interactive) {
-    return { reason: 'interaction_required', error: 'Please sign in with Google.' };
+    return { reason: 'interaction_required', error: lamissT('common.signInPlease') };
   }
   if (/did not approve|cancel|closed/i.test(message)) {
-    return { reason: 'cancelled', error: 'Sign-in was cancelled.' };
+    return { reason: 'cancelled', error: lamissT('common.signInCancelled') };
   }
   return { reason: 'failed', error: `Google sign-in failed: ${message}` };
 }

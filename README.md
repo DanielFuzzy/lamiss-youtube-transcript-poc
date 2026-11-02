@@ -112,8 +112,8 @@ has a home view and one view per settings category, each with a back arrow:
   and a test tone), tutor voice (`GET /api/speech/voices`, filtered to the
   learning language), **Preview voice**, speaking speed, and volume.
 - **Tutor Behavior**: kindness, question frequency, response length,
-  encouragement, explanation language, and **Auto-pause for questions**
-  (`tutor.autoPause`; see below).
+  encouragement, **Tutor language** (`tutorLanguage`; see Languages below), and
+  **Auto-pause for questions** (`tutor.autoPause`; see below).
 - **Profile & Account**: name, email and picture from `/api/auth/me` (read-only:
   Google refreshes them at every sign-in). Clicking the profile row edits the
   username (3–20 of `A–Z a–z 0–9 _`, checked before sending) with
@@ -142,6 +142,24 @@ reporting positions while a question plays over the video. The worker stores
 with each pending question whether it was paused, so a question replayed after
 a reconnect pauses only if it did the first time.
 
+**Languages** (TDR-0003,
+[docs/TDR-0003-Language-Preferences.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0003-Language-Preferences.md)).
+Three languages, each set apart from the others:
+
+- **App language**: what the extension shows. The row of `EN ES FR DE PT` at the
+  top of the popup switches the popup, the chat panel, the microphone page and
+  everything Lamiss shows on YouTube, at once. It starts as the browser's
+  language when it is one of the five, else English. Strings live in one
+  catalog, `src/shared/lamiss-i18n.ts` (`lamissT(key, params)`; HTML uses
+  `data-i18n` and `data-i18n-attr`), loaded before `shared/lamiss-api.js` in
+  every context. A language is added by adding a column to every message there
+  (TypeScript reports a missing one).
+- **Tutor language**: what Lamiss asks, explains and gives feedback in. It's a
+  backend preference, "Video's language" (`null`) by default. `ASK_QUESTION`
+  carries the question's `language`, so the right voice reads it.
+- **Caption language**: the transcript Lamiss reads, picked from the video's
+  spoken language by `selectVideoCaptionTrack`. The other two never change it.
+
 Each view is its own script under `src/popup/` (`home-view.ts`,
 `audio-view.ts`, `tutor-view.ts`, `profile-view.ts`) on top of
 `popup-shared.ts`; `popup.ts` wires the navigation.
@@ -151,8 +169,9 @@ Where the settings live:
 | Where | What |
 |---|---|
 | `chrome.storage.local` `lamissDeviceSettings` | `{ micDeviceId?, speakerDeviceId?, volume }` (volume 0–1). Device IDs belong to this machine and browser profile and never leave the extension. The chat panel records with `micDeviceId`; the worker adds `micDeviceId` to the offscreen document's `listen` and `speakerDeviceId` + `volume` to its `speak` messages. A device that is gone falls back to the default one. |
+| `chrome.storage.local` `lamissAppLanguage` | The app language: `en`, `es`, `fr`, `de` or `pt`. Every page and the content script follow changes through `chrome.storage.onChanged`. |
 | `chrome.storage.local` `lamissQuestionSettings` | Question frequency (`minSecondsBetweenQuestions`: Less 300, Normal 120, More 60) and difficulty, also set from the chat panel. |
-| Backend, `GET`/`PUT /api/me/preferences` | Languages, level, learning goal, daily goal minutes, kindness, response length, encouragement, explanation language, auto-pause, voice, speed. |
+| Backend, `GET`/`PUT /api/me/preferences` | Native and learning language, tutor language (`tutorLanguage`; the backend also returns it as the older `tutor.explanationLanguage`, which the extension never sends), level, learning goal, daily goal minutes, kindness, response length, encouragement, auto-pause, voice, speed. |
 | Backend, `PATCH /api/me/profile` | Username. |
 
 To see every view in a browser with a stubbed backend and fake media devices:

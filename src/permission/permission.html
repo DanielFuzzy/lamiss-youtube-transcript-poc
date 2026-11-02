@@ -99,10 +99,11 @@
 <body>
   <main class="card">
     <div class="logo" aria-hidden="true"><img src="../brand/lamiss-logo.svg" alt="" width="54" height="54" /></div>
-    <h1>Enable your microphone</h1>
-    <p id="micStatus" aria-live="polite">Lamiss needs microphone access so you can ask questions out loud. Chrome will ask you once.</p>
-    <button id="grantMic">Allow microphone</button>
+    <h1 data-i18n="permission.title">Enable your microphone</h1>
+    <p id="micStatus" aria-live="polite" data-i18n="permission.intro">Lamiss needs microphone access so you can ask questions out loud. Chrome will ask you once.</p>
+    <button id="grantMic" data-i18n="common.allowMic">Allow microphone</button>
   </main>
+  <script src="../shared/lamiss-i18n.js"></script>
   <script src="permission.js"></script>
 </body>
 </html>

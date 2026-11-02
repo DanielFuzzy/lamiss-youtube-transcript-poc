@@ -30,7 +30,7 @@ const chatSignInDetail = document.getElementById('signInDetail') as HTMLParagrap
 const chatSignInButton = document.getElementById('signInButton') as HTMLButtonElement;
 
 const CHAT_DIFFICULTIES: LamissQuestionDifficulty[] = ['EASY', 'MEDIUM', 'HARD'];
-const CHAT_DIFFICULTY_LABELS: Record<LamissQuestionDifficulty, string> = { EASY: 'Easy', MEDIUM: 'Medium', HARD: 'Hard' };
+const CHAT_DIFFICULTY_LABELS: Record<LamissQuestionDifficulty, LamissMessageKey> = { EASY: 'common.easy', MEDIUM: 'common.medium', HARD: 'common.hard' };
 
 let chatSessionId: number | undefined;
 let chatBusy = false;
@@ -41,6 +41,13 @@ let chatLogLoading = false;
 let chatLogStale = false;
 let chatSignedIn = false;
 let chatStarting = false;
+// The header's status line, rebuilt when the app language changes.
+let chatStatus: () => string = () => lamissT('chat.starting');
+
+function chatSetStatus(status: () => string): void {
+  chatStatus = status;
+  chatSessionStatus.textContent = status();
+}
 
 type ChatQuestion = {
   interactionId: string;
@@ -94,7 +101,7 @@ function chatAddMessage(from: 'user' | 'lamiss', text: string, meta: string, con
 }
 
 function chatSpeakerLabel(from: 'user' | 'lamiss', time: string): string {
-  return `${from === 'user' ? 'You' : 'Lamiss'} · ${time}`;
+  return `${from === 'user' ? lamissT('chat.you') : 'Lamiss'} · ${time}`;
 }
 
 // Lines that happened on this page, added straight away. If the history is
@@ -122,7 +129,7 @@ async function chatLoadLog(): Promise<void> {
       chatLogStale = false;
       const result = await fetchSessionChat(chatSessionId);
       if (!result.ok) {
-        chatAddNote(`Couldn't load the conversation so far: ${result.error}`);
+        chatAddNote(lamissT('chat.couldNotLoad', { error: result.error }));
         return;
       }
       if (chatLogStale) {
@@ -142,7 +149,7 @@ async function chatLoadLog(): Promise<void> {
 function chatAddTyping(): HTMLDivElement {
   const message = document.createElement('div');
   message.className = 'message lamiss';
-  message.setAttribute('aria-label', 'Lamiss is thinking');
+  message.setAttribute('aria-label', lamissT('chat.thinking'));
 
   const bubble = document.createElement('div');
   bubble.className = 'bubble typing';
@@ -161,8 +168,8 @@ function chatRender(): void {
   chatSendButton.disabled = !ready || chatBusy || recording || chatInput.value.trim().length === 0;
   chatMicButton.disabled = !ready || (chatBusy && !recording);
   chatMicButton.dataset.state = recording ? 'recording' : 'idle';
-  chatMicButton.setAttribute('aria-label', recording ? 'Stop recording and send' : 'Ask with your voice');
-  chatMicButton.title = recording ? 'Stop and send' : 'Ask with your voice';
+  chatMicButton.setAttribute('aria-label', lamissT(recording ? 'chat.stopRecordingAndSend' : 'chat.askVoice'));
+  chatMicButton.title = lamissT(recording ? 'chat.stopAndSend' : 'chat.askVoice');
 }
 
 function chatResizeInput(): void {
@@ -177,12 +184,12 @@ function chatShowSignIn(detail?: { text: string; error?: boolean }): void {
   // The conversation belongs to the account that just left.
   chatLog.replaceChildren();
   chatPending.replaceChildren();
-  chatSessionStatus.textContent = LAMISS_SIGN_IN_REQUIRED_MESSAGE;
+  chatSetStatus(lamissSignInRequiredMessage);
   chatSignIn.hidden = false;
-  chatSignInDetail.textContent = detail?.text ?? 'Your conversations are saved to your Lamiss account.';
+  chatSignInDetail.textContent = detail?.text ?? lamissT('chat.signInDetail');
   chatSignInDetail.classList.toggle('error', detail?.error === true);
   chatSignInButton.disabled = false;
-  chatSignInButton.textContent = 'Sign in with Google';
+  chatSignInButton.textContent = lamissT('common.signInWithGoogle');
   chatRender();
 }
 
@@ -191,7 +198,7 @@ async function chatSyncAuth(): Promise<void> {
   const state = await readAuthState();
   if (state.status !== 'signedIn') {
     if (chatSignedIn || chatSignIn.hidden) {
-      chatShowSignIn(state.status === 'expired' ? { text: LAMISS_SIGN_IN_AGAIN_MESSAGE } : undefined);
+      chatShowSignIn(state.status === 'expired' ? { text: lamissSignInAgainMessage() } : undefined);
     }
     return;
   }
@@ -204,13 +211,13 @@ async function chatSyncAuth(): Promise<void> {
 
 chatSignInButton.addEventListener('click', async () => {
   chatSignInButton.disabled = true;
-  chatSignInButton.textContent = 'Signing in…';
-  chatSignInDetail.textContent = 'Continue in the Google window.';
+  chatSignInButton.textContent = lamissT('common.signingIn');
+  chatSignInDetail.textContent = lamissT('chat.continueInGoogle');
   chatSignInDetail.classList.remove('error');
   const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
     .catch((error: unknown): LamissSignInResult => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
   if (!result?.ok) {
-    chatShowSignIn({ text: result?.error ?? 'Sign-in failed. Please try again.', error: result?.reason !== 'cancelled' });
+    chatShowSignIn({ text: result?.error ?? lamissT('common.signInFailed'), error: result?.reason !== 'cancelled' });
     return;
   }
   await chatSyncAuth();
@@ -218,14 +225,14 @@ chatSignInButton.addEventListener('click', async () => {
 
 async function chatStartSession(): Promise<void> {
   if (!chatVideoId || !Number.isInteger(chatTabId)) {
-    chatSessionStatus.textContent = 'Open this chat from a YouTube video';
+    chatSetStatus(() => lamissT('chat.openFromVideo'));
     return;
   }
   if (chatStarting) {
     return;
   }
 
-  chatSessionStatus.textContent = 'Starting your session…';
+  chatSetStatus(() => lamissT('chat.starting'));
   chatStarting = true;
   // Through the worker, so this is the same session as Lamiss's live questions.
   const session = await chrome.runtime.sendMessage({ type: LAMISS_START_SESSION_MESSAGE, videoId: chatVideoId })
@@ -236,7 +243,7 @@ async function chatStartSession(): Promise<void> {
       chatShowSignIn({ text: session.error });
       return;
     }
-    chatSessionStatus.textContent = 'Could not start a session';
+    chatSetStatus(() => lamissT('chat.couldNotStart'));
     chatAddNote(session.error);
     return;
   }
@@ -245,10 +252,12 @@ async function chatStartSession(): Promise<void> {
     return;
   }
 
-  chatSessionId = session.data.learningSessionId;
-  chatSessionStatus.textContent = `${session.data.resumed ? 'Resumed' : 'Started'} session ${chatSessionId}`;
+  const sessionId = session.data.learningSessionId;
+  const resumed = session.data.resumed;
+  chatSessionId = sessionId;
+  chatSetStatus(() => lamissT(resumed ? 'chat.resumed' : 'chat.started', { id: sessionId }));
   if (!session.data.aiKnowledgeReady) {
-    chatAddNote('Lamiss hasn\'t finished learning this video yet, so questions may fail for a moment.');
+    chatAddNote(lamissT('chat.notReady'));
   }
   chatRender();
   chatInput.focus();
@@ -288,20 +297,20 @@ async function chatSend(question: ChatQuestion, userMessage: HTMLDivElement): Pr
     // Answered, so both lines are now in the session's history.
     userMessage.remove();
     chatAppendLive('user', userBubble.textContent ?? '');
-    chatAppendLive('lamiss', result.data.answer?.trim() || 'Lamiss returned an empty answer.');
+    chatAppendLive('lamiss', result.data.answer?.trim() || lamissT('chat.emptyAnswer'));
     return;
   }
 
   if (result.signInRequired) {
     chatShowSignIn({ text: result.error });
   }
-  const failure = chatAddMessage('lamiss', `Lamiss couldn't answer: ${result.error}`, 'Lamiss', chatPending);
+  const failure = chatAddMessage('lamiss', lamissT('chat.couldNotAnswer', { error: result.error }), 'Lamiss', chatPending);
   failure.classList.add('error');
   if (result.retryable) {
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.className = 'retry';
-    retry.textContent = 'Try again';
+    retry.textContent = lamissT('common.tryAgain');
     retry.addEventListener('click', () => {
       if (chatBusy) {
         return;
@@ -322,7 +331,7 @@ async function chatSendText(): Promise<void> {
   chatInput.value = '';
   chatResizeInput();
   const videoPositionMs = await readVideoPositionMs(chatTabId);
-  const userMessage = chatAddMessage('user', text, `You · ${formatVideoPosition(videoPositionMs)}`, chatPending);
+  const userMessage = chatAddMessage('user', text, `${lamissT('chat.you')} · ${formatVideoPosition(videoPositionMs)}`, chatPending);
   await chatSend({ interactionId: crypto.randomUUID(), videoPositionMs, text }, userMessage);
 }
 
@@ -332,11 +341,11 @@ async function chatStartRecording(): Promise<void> {
     stream = await openMicrophone();
   } catch (error) {
     console.error('Lamiss POC: microphone error:', error);
-    chatAddNote('Could not open the microphone.');
+    chatAddNote(lamissT('common.micFailed'));
     return;
   }
   if (!stream) {
-    chatAddNote('Allow microphone access in the tab that just opened, then tap the mic again.');
+    chatAddNote(lamissT('chat.allowMicTab'));
     return;
   }
 
@@ -358,12 +367,12 @@ async function chatStartRecording(): Promise<void> {
 
     const audio = new Blob(chunks, { type: (recorder.mimeType || 'audio/webm').split(';')[0] });
     if (Date.now() - chatRecordingStartedAt < CHAT_MIN_RECORDING_MS || audio.size === 0) {
-      chatAddNote('That was too short. Tap the mic and ask again.');
+      chatAddNote(lamissT('chat.tooShort'));
       return;
     }
 
     // The backend returns the transcribed question; it replaces this placeholder.
-    const userMessage = chatAddMessage('user', 'Voice question…', `You · ${formatVideoPosition(videoPositionMs)}`, chatPending);
+    const userMessage = chatAddMessage('user', lamissT('chat.voiceQuestion'), `${lamissT('chat.you')} · ${formatVideoPosition(videoPositionMs)}`, chatPending);
     userMessage.querySelector('.bubble')?.classList.add('pending-voice');
     void chatSend({ interactionId: crypto.randomUUID(), videoPositionMs, audio }, userMessage);
   });
@@ -409,8 +418,8 @@ chatMicButton.addEventListener('click', () => {
 });
 
 function chatRenderSettingLabels(): void {
-  chatAmountValue.textContent = `At least ${formatQuestionGap(LAMISS_QUESTION_GAPS_SECONDS[Number(chatAmountInput.value)])} apart`;
-  chatDifficultyValue.textContent = CHAT_DIFFICULTY_LABELS[CHAT_DIFFICULTIES[Number(chatDifficultyInput.value)]];
+  chatAmountValue.textContent = lamissT('common.gapApart', { gap: formatQuestionGap(LAMISS_QUESTION_GAPS_SECONDS[Number(chatAmountInput.value)]) });
+  chatDifficultyValue.textContent = lamissT(CHAT_DIFFICULTY_LABELS[CHAT_DIFFICULTIES[Number(chatDifficultyInput.value)]]);
 }
 
 async function chatLoadSettings(): Promise<void> {
@@ -483,6 +492,29 @@ chrome.runtime.onMessage.addListener((message: Partial<LamissLiveLogMessage> & {
   return false;
 });
 
-chatRender();
-void chatLoadSettings();
-void chatSyncAuth();
+// The app language changed on another page (TDR-0003): the static text, the
+// labels and the conversation's "You · 14:41" lines follow.
+onAppLanguageChange(() => {
+  applyLamissTranslations();
+  chatSessionStatus.textContent = chatStatus();
+  chatRender();
+  chatRenderSettingLabels();
+  if (!chatSignIn.hidden) {
+    chatSignInDetail.textContent = lamissT('chat.signInDetail');
+    chatSignInButton.textContent = lamissT('common.signInWithGoogle');
+  }
+  void chatLoadLog();
+});
+
+void (async () => {
+  try {
+    await loadAppLanguage();
+    applyLamissTranslations();
+    chatSessionStatus.textContent = chatStatus();
+  } finally {
+    document.documentElement.removeAttribute('data-lamiss-i18n');
+  }
+  chatRender();
+  void chatLoadSettings();
+  void chatSyncAuth();
+})();

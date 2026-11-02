@@ -120,7 +120,7 @@ function questionEnv() {
     clearInterval: () => undefined
   };
   const env = createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-api.js', 'content/youtube.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'content/youtube.js'],
     withoutSessionStorage: true,
     globals: {
       window,
@@ -294,4 +294,46 @@ test('a PAUSE_VIDEO is used by the question it announces only', async () => {
   assert.equal(page.env.run('lamissQuestion.holdPaused'), false);
   page.dispatch('play');
   assert.equal(page.video.paused, false);
+});
+
+// TDR-0003: the question comes in the tutor language, which picks the voice;
+// the caption language is only the fallback.
+test('tutor language: a question in another language than the captions is read with its own voice', async () => {
+  const page = questionEnv();
+  await flush();
+  page.env.run('lamissCaptionLanguage = "en";');
+  page.server({ type: 'PAUSE_VIDEO' });
+  page.server({ type: 'ASK_QUESTION', eventId: 'e1', question: '¿Qué dijo ella?', language: 'es' });
+  const speak = page.posted.filter(message => message.type === 'speak').at(-1);
+  assert.equal(speak.text, '¿Qué dijo ella?');
+  assert.equal(speak.language, 'es');
+
+  await page.speechEnded();
+  // Feedback without a language of its own follows the question's.
+  page.server({ type: 'FEEDBACK', correct: true, feedback: '¡Muy bien!' });
+  assert.equal(page.posted.filter(message => message.type === 'speak').at(-1).language, 'es');
+});
+
+test('tutor language: without one (an older backend), the question is read in the caption language as before', async () => {
+  const page = questionEnv();
+  await flush();
+  page.env.run('lamissCaptionLanguage = "en";');
+  page.server({ type: 'ASK_QUESTION', eventId: 'e1', question: 'What did she say?' });
+  assert.equal(page.posted.filter(message => message.type === 'speak').at(-1).language, 'en');
+});
+
+test('app language: the open question card switches language at once, the question itself does not', async () => {
+  const page = questionEnv();
+  await flush();
+  page.server({ type: 'ASK_QUESTION', eventId: 'e1', question: 'What did she say?', language: 'en' });
+  const card = page.player.querySelector('.lamiss-question__card');
+  const submit = card.querySelector('.lamiss-question__submit');
+  assert.equal(submit.textContent, 'Answer');
+
+  for (const listener of page.env.chrome.storage.onChanged.listeners) {
+    listener({ lamissAppLanguage: { newValue: 'es' } }, 'local');
+  }
+  assert.equal(submit.textContent, 'Responder');
+  assert.equal(card.querySelector('.lamiss-question__heading').textContent, 'Lamiss pregunta · 0:42');
+  assert.equal(card.querySelector('.lamiss-question__text').textContent, 'What did she say?');
 });

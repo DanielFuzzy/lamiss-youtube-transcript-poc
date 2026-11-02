@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lamiss-i18n="pending">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,11 +9,13 @@
 <body>
   <!-- Home: Start Learning, the four category cards and the status line. -->
   <section id="homeView" class="view view-home" data-view="home">
+    <!-- The app language (TDR-0003): five quick choices, filled by popup.ts. -->
+    <div id="appLanguagePicker" class="app-language" role="group" data-i18n-attr="aria-label:appLanguage.label"></div>
     <header class="hero">
       <img class="hero-logo" src="../brand/lamiss-logo.svg" alt="" width="68" height="68" />
       <h1 class="hero-title">LAMISS</h1>
-      <p class="hero-tagline">Your AI language tutor</p>
-      <p class="hero-intro">Open a YouTube video and practice with me while you watch.</p>
+      <p class="hero-tagline" data-i18n="home.tagline">Your AI language tutor</p>
+      <p class="hero-intro" data-i18n="home.intro">Open a YouTube video and practice with me while you watch.</p>
     </header>
 
     <section id="signInCard" class="card sign-in-card" aria-live="polite" hidden>
@@ -24,7 +26,7 @@
         <p id="signInTitle" class="sign-in-title">Sign in to start learning</p>
         <p id="signInDetail" class="sign-in-detail">Lamiss keeps your settings and progress with your Google account.</p>
       </div>
-      <button id="signInButton" class="btn btn-primary btn-block" type="button">Sign in with Google</button>
+      <button id="signInButton" class="btn btn-primary btn-block" type="button" data-i18n="common.signInWithGoogle">Sign in with Google</button>
     </section>
 
     <button id="startButton" class="start-button" type="button" disabled>
@@ -37,18 +39,18 @@
 
     <div id="homeProgress" class="progress progress-compact" hidden>
       <div class="progress-row">
-        <span class="progress-label">Daily goal</span>
+        <span class="progress-label" data-i18n="common.dailyGoal">Daily goal</span>
         <span id="homeProgressText" class="progress-text"></span>
       </div>
       <span class="progress-bar" aria-hidden="true"><span id="homeProgressFill" class="progress-fill"></span></span>
     </div>
 
-    <nav class="categories" aria-label="Settings">
+    <nav class="categories" aria-label="Settings" data-i18n-attr="aria-label:home.settings">
       <button class="category" type="button" data-open="captions">
         <span class="tile tile-purple" aria-hidden="true"><span class="tile-cc">CC</span></span>
         <span class="category-text">
-          <span class="category-title">Double Captions</span>
-          <span class="category-detail">Original + translated subtitles</span>
+          <span class="category-title" data-i18n="home.captionsTitle">Double Captions</span>
+          <span class="category-detail" data-i18n="home.captionsDetail">Original + translated subtitles</span>
         </span>
         <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
       </button>
@@ -57,8 +59,8 @@
           <svg viewBox="0 0 24 24"><path d="M3 10v4M7 7v10M11 4v16M15 8v8M19 6v12" /></svg>
         </span>
         <span class="category-text">
-          <span class="category-title">Audio &amp; Voice</span>
-          <span class="category-detail">Microphone, speaker, tutor voice</span>
+          <span class="category-title" data-i18n="home.audioTitle">Audio &amp; Voice</span>
+          <span class="category-detail" data-i18n="home.audioDetail">Microphone, speaker, tutor voice</span>
         </span>
         <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
       </button>
@@ -67,8 +69,8 @@
           <svg viewBox="0 0 24 24"><path d="M19.5 12.6 12 20l-7.5-7.4A5 5 0 1 1 12 6a5 5 0 1 1 7.5 6.6Z" /></svg>
         </span>
         <span class="category-text">
-          <span class="category-title">Tutor Behavior</span>
-          <span class="category-detail" data-signed-in-text="Kindness, questions, and more">Kindness, questions, and more</span>
+          <span class="category-title" data-i18n="home.tutorTitle">Tutor Behavior</span>
+          <span class="category-detail" data-signed-in-key="home.tutorDetail">Kindness, questions, and more</span>
         </span>
         <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
       </button>
@@ -77,8 +79,8 @@
           <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
         </span>
         <span class="category-text">
-          <span class="category-title">Profile &amp; Account</span>
-          <span class="category-detail" data-signed-in-text="Your preferences and sign out">Your preferences and sign out</span>
+          <span class="category-title" data-i18n="home.profileTitle">Profile &amp; Account</span>
+          <span class="category-detail" data-signed-in-key="home.profileDetail">Your preferences and sign out</span>
         </span>
         <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
       </button>
@@ -93,17 +95,17 @@
   <!-- Double Captions: not built yet (TDR-0002); says so instead of pretending. -->
   <section id="captionsView" class="view" data-view="captions" hidden>
     <header class="view-header">
-      <button class="back-button" type="button" data-back aria-label="Back to home">
+      <button class="back-button" type="button" data-back aria-label="Back to home" data-i18n-attr="aria-label:common.backHome">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
       </button>
-      <h2>Double Captions</h2>
+      <h2 data-i18n="home.captionsTitle">Double Captions</h2>
     </header>
     <div class="view-body">
       <section class="intro">
         <span class="tile tile-purple" aria-hidden="true"><span class="tile-cc">CC</span></span>
         <div>
-          <p class="intro-title">Double Captions <span class="badge">Coming soon</span></p>
-          <p class="intro-detail">Original and translated subtitles, together while you watch.</p>
+          <p class="intro-title"><span data-i18n="home.captionsTitle">Double Captions</span> <span class="badge" data-i18n="captions.comingSoon">Coming soon</span></p>
+          <p class="intro-detail" data-i18n="captions.intro">Original and translated subtitles, together while you watch.</p>
         </div>
       </section>
 
@@ -113,9 +115,9 @@
       </div>
 
       <section class="card note-card">
-        <p class="note-title">What's coming</p>
-        <p>Lamiss will show the video's own subtitle line with its translation right below it, stacked on the YouTube player, in the language you choose.</p>
-        <p>This isn't available yet, so there's nothing to switch on here today. Lamiss already reads the video's captions to ask you questions about it.</p>
+        <p class="note-title" data-i18n="captions.whatsComing">What's coming</p>
+        <p data-i18n="captions.coming1">Lamiss will show the video's own subtitle line with its translation right below it, stacked on the YouTube player, in the language you choose.</p>
+        <p data-i18n="captions.coming2">This isn't available yet, so there's nothing to switch on here today. Lamiss already reads the video's captions to ask you questions about it.</p>
       </section>
     </div>
   </section>
@@ -123,10 +125,10 @@
   <!-- Audio & Voice -->
   <section id="audioView" class="view" data-view="audio" hidden>
     <header class="view-header">
-      <button class="back-button" type="button" data-back aria-label="Back to home">
+      <button class="back-button" type="button" data-back aria-label="Back to home" data-i18n-attr="aria-label:common.backHome">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
       </button>
-      <h2>Audio &amp; Voice</h2>
+      <h2 data-i18n="home.audioTitle">Audio &amp; Voice</h2>
       <span id="audioSaveState" class="save-state" aria-live="polite"></span>
     </header>
     <p class="save-error" data-save-error role="alert" hidden></p>
@@ -136,24 +138,24 @@
           <svg viewBox="0 0 24 24"><path d="M3 10v4M7 7v10M11 4v16M15 8v8M19 6v12" /></svg>
         </span>
         <div>
-          <p class="intro-title">Audio &amp; Voice</p>
-          <p class="intro-detail">Choose your devices and your tutor's voice.</p>
+          <p class="intro-title" data-i18n="home.audioTitle">Audio &amp; Voice</p>
+          <p class="intro-detail" data-i18n="audio.intro">Choose your devices and your tutor's voice.</p>
         </div>
       </section>
 
       <section class="setting">
         <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" /><path d="M12 17v5" /></svg>
         <div class="setting-main">
-          <label class="setting-label" for="micSelect">Microphone</label>
-          <select id="micSelect" class="select"><option value="">System default</option></select>
+          <label class="setting-label" for="micSelect" data-i18n="audio.microphone">Microphone</label>
+          <select id="micSelect" class="select"><option value="" data-i18n="audio.systemDefault">System default</option></select>
           <div id="micPermission" class="inline-note" hidden>
-            <p>Allow microphone access so Lamiss can list your microphones and hear your answers.</p>
-            <button id="micPermissionButton" class="btn btn-soft btn-small" type="button">Allow microphone</button>
+            <p data-i18n="audio.micPermission">Allow microphone access so Lamiss can list your microphones and hear your answers.</p>
+            <button id="micPermissionButton" class="btn btn-soft btn-small" type="button" data-i18n="common.allowMic">Allow microphone</button>
           </div>
           <div id="micMeter" class="meter" aria-hidden="true"></div>
           <button id="micTestButton" class="btn btn-soft btn-block" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" /></svg>
-            <span>Test microphone</span>
+            <span data-i18n="audio.testMic">Test microphone</span>
           </button>
           <p id="micMessage" class="field-message" aria-live="polite"></p>
         </div>
@@ -162,12 +164,12 @@
       <section class="setting">
         <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /></svg>
         <div class="setting-main">
-          <label class="setting-label" for="speakerSelect">Speaker / Output</label>
-          <select id="speakerSelect" class="select"><option value="">System default</option></select>
-          <p id="speakerUnsupported" class="field-message" hidden>This browser can't pick a speaker for extensions, so Lamiss plays on your default one.</p>
+          <label class="setting-label" for="speakerSelect" data-i18n="audio.speaker">Speaker / Output</label>
+          <select id="speakerSelect" class="select"><option value="" data-i18n="audio.systemDefault">System default</option></select>
+          <p id="speakerUnsupported" class="field-message" data-i18n="audio.speakerUnsupported" hidden>This browser can't pick a speaker for extensions, so Lamiss plays on your default one.</p>
           <button id="speakerTestButton" class="btn btn-soft btn-block" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z" class="filled" /></svg>
-            <span>Test audio</span>
+            <span data-i18n="audio.testAudio">Test audio</span>
           </button>
           <p id="speakerMessage" class="field-message" aria-live="polite"></p>
         </div>
@@ -176,15 +178,15 @@
       <section class="setting">
         <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4M7 7v10M11 4v16M15 8v8M19 6v12" /></svg>
         <div class="setting-main">
-          <label class="setting-label" for="voiceSelect">Tutor voice</label>
-          <p id="voiceAccountNote" class="field-message" hidden>Sign in to choose Lamiss's voice and speed.</p>
+          <label class="setting-label" for="voiceSelect" data-i18n="audio.tutorVoice">Tutor voice</label>
+          <p id="voiceAccountNote" class="field-message" data-i18n="audio.voiceSignIn" hidden>Sign in to choose Lamiss's voice and speed.</p>
           <div id="voiceControls">
-            <select id="voiceSelect" class="select" disabled><option>Loading voices…</option></select>
+            <select id="voiceSelect" class="select" disabled><option data-i18n="audio.loadingVoices">Loading voices…</option></select>
             <p id="voiceReadOnly" class="read-only-value" hidden></p>
             <p id="voiceHint" class="field-hint"></p>
             <button id="voicePreviewButton" class="btn btn-soft btn-block" type="button" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z" class="filled" /></svg>
-              <span>Preview voice</span>
+              <span data-i18n="audio.previewVoice">Preview voice</span>
             </button>
             <p id="voiceMessage" class="field-message" aria-live="polite"></p>
           </div>
@@ -195,7 +197,7 @@
         <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14l4-4" /><path d="M3.3 19a10 10 0 1 1 17.4 0" /></svg>
         <div class="setting-main">
           <div class="slider-row">
-            <label class="setting-label" for="speedInput">Speaking speed</label>
+            <label class="setting-label" for="speedInput" data-i18n="audio.speed">Speaking speed</label>
             <output id="speedValue" class="slider-value" for="speedInput">1.0x</output>
           </div>
           <input id="speedInput" class="slider" type="range" min="0.5" max="2" step="0.05" value="1" disabled />
@@ -206,7 +208,7 @@
         <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /></svg>
         <div class="setting-main">
           <div class="slider-row">
-            <label class="setting-label" for="volumeInput">Voice volume</label>
+            <label class="setting-label" for="volumeInput" data-i18n="audio.volume">Voice volume</label>
             <output id="volumeValue" class="slider-value" for="volumeInput">100%</output>
           </div>
           <input id="volumeInput" class="slider" type="range" min="0" max="100" step="5" value="100" />
@@ -218,10 +220,10 @@
   <!-- Tutor Behavior -->
   <section id="tutorView" class="view" data-view="tutor" hidden>
     <header class="view-header">
-      <button class="back-button" type="button" data-back aria-label="Back to home">
+      <button class="back-button" type="button" data-back aria-label="Back to home" data-i18n-attr="aria-label:common.backHome">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
       </button>
-      <h2>Tutor Behavior</h2>
+      <h2 data-i18n="home.tutorTitle">Tutor Behavior</h2>
       <span id="tutorSaveState" class="save-state" aria-live="polite"></span>
     </header>
     <p class="save-error" data-save-error role="alert" hidden></p>
@@ -231,35 +233,35 @@
           <svg viewBox="0 0 24 24"><path d="M19.5 12.6 12 20l-7.5-7.4A5 5 0 1 1 12 6a5 5 0 1 1 7.5 6.6Z" /></svg>
         </span>
         <div>
-          <p class="intro-title">Tutor Behavior</p>
-          <p class="intro-detail">Customize how Lamiss talks with you while you learn.</p>
+          <p class="intro-title" data-i18n="home.tutorTitle">Tutor Behavior</p>
+          <p class="intro-detail" data-i18n="tutor.intro">Customize how Lamiss talks with you while you learn.</p>
         </div>
       </section>
 
-      <div id="tutorLoading" class="loading-card">Loading your preferences…</div>
+      <div id="tutorLoading" class="loading-card" data-i18n="tutor.loading">Loading your preferences…</div>
       <div id="tutorError" class="error-card" hidden>
         <p id="tutorErrorText"></p>
-        <button id="tutorRetryButton" class="btn btn-soft btn-small" type="button">Try again</button>
+        <button id="tutorRetryButton" class="btn btn-soft btn-small" type="button" data-i18n="common.tryAgain">Try again</button>
       </div>
 
       <div id="tutorForm" hidden>
         <fieldset class="group">
           <legend class="group-label">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12.6 12 20l-7.5-7.4A5 5 0 1 1 12 6a5 5 0 1 1 7.5 6.6Z" /></svg>
-            Kindness
+            <span data-i18n="tutor.kindness">Kindness</span>
           </legend>
           <div class="segmented" data-segment="kindness">
             <button type="button" data-value="GENTLE" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3.5c2 1.5 2 4 0 5.5M12 2c2 2 2 5 0 7M16 3.5c2 1.5 2 4 0 5.5" /><path d="M4 14c2.5 4 13.5 4 16 0" /><path d="M5 20h14" /></svg>
-              <span>Gentle</span>
+              <span data-i18n="tutor.gentle">Gentle</span>
             </button>
             <button type="button" data-value="BALANCED" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
-              <span>Balanced</span>
+              <span data-i18n="tutor.balanced">Balanced</span>
             </button>
             <button type="button" data-value="STRICT" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" /><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4" /><path d="M12 14v4M8 21h8" /></svg>
-              <span>Strict</span>
+              <span data-i18n="tutor.strict">Strict</span>
             </button>
           </div>
         </fieldset>
@@ -267,20 +269,20 @@
         <fieldset class="group">
           <legend class="group-label">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" /><path d="M8.5 12h.01M12 12h.01M15.5 12h.01" /></svg>
-            Question frequency
+            <span data-i18n="tutor.frequency">Question frequency</span>
           </legend>
           <div class="segmented" data-segment="frequency">
             <button type="button" data-value="LESS" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2M10 2h4" /></svg>
-              <span>Less</span>
+              <span data-i18n="tutor.less">Less</span>
             </button>
             <button type="button" data-value="NORMAL" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4M9.5 7v10M14.5 4v16M19 9v6" /></svg>
-              <span>Normal</span>
+              <span data-i18n="tutor.normal">Normal</span>
             </button>
             <button type="button" data-value="MORE" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></svg>
-              <span>More</span>
+              <span data-i18n="tutor.more">More</span>
             </button>
           </div>
         </fieldset>
@@ -288,20 +290,20 @@
         <fieldset class="group">
           <legend class="group-label">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13" /></svg>
-            Response length
+            <span data-i18n="tutor.responseLength">Response length</span>
           </legend>
           <div class="segmented" data-segment="responseLength">
             <button type="button" data-value="SHORT" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Z" /><path d="M9 12h6" /></svg>
-              <span>Short</span>
+              <span data-i18n="tutor.short">Short</span>
             </button>
             <button type="button" data-value="NORMAL" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Z" /><path d="M9 11h6M9 15h6" /></svg>
-              <span>Normal</span>
+              <span data-i18n="tutor.normal">Normal</span>
             </button>
             <button type="button" data-value="DETAILED" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
-              <span>Detailed</span>
+              <span data-i18n="tutor.detailed">Detailed</span>
             </button>
           </div>
         </fieldset>
@@ -309,8 +311,8 @@
         <div class="toggle-row">
           <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4L12 3Z" /><path d="M19 15l.8 1.9 1.9.8-1.9.8L19 20.5l-.8-2-1.9-.8 1.9-.8L19 15Z" /></svg>
           <div class="toggle-text">
-            <label class="setting-label" for="encouragementInput">Encouragement</label>
-            <p class="field-hint">Motivational messages and praise</p>
+            <label class="setting-label" for="encouragementInput" data-i18n="tutor.encouragement">Encouragement</label>
+            <p class="field-hint" data-i18n="tutor.encouragementHint">Motivational messages and praise</p>
           </div>
           <label class="switch">
             <input id="encouragementInput" type="checkbox" />
@@ -321,16 +323,16 @@
         <div class="setting">
           <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
           <div class="setting-main">
-            <label class="setting-label" for="explanationSelect">Show explanations in</label>
-            <select id="explanationSelect" class="select"></select>
-            <p class="field-hint">Language Lamiss uses to explain things to you</p>
+            <label class="setting-label" for="tutorLanguageSelect" data-i18n="tutor.language">Tutor language</label>
+            <select id="tutorLanguageSelect" class="select" aria-describedby="tutorLanguageHint"></select>
+            <p id="tutorLanguageHint" class="field-hint" data-i18n="tutor.languageHint">Lamiss asks, explains and gives feedback in this language, whatever language the video's captions are in.</p>
           </div>
         </div>
 
         <div class="toggle-row">
           <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
           <div class="toggle-text">
-            <label class="setting-label" for="autoPauseInput">Auto-pause for questions</label>
+            <label class="setting-label" for="autoPauseInput" data-i18n="tutor.autoPause">Auto-pause for questions</label>
             <p id="autoPauseHint" class="field-hint">Lamiss will pause the video when asking you</p>
           </div>
           <label class="switch">
@@ -339,7 +341,7 @@
           </label>
         </div>
 
-        <p class="footnote">Kindness, length and encouragement shape Lamiss's answers to your questions and its feedback on your answers.</p>
+        <p class="footnote" data-i18n="tutor.footnote">Kindness, length and encouragement shape Lamiss's answers to your questions and its feedback on your answers.</p>
       </div>
     </div>
   </section>
@@ -347,10 +349,10 @@
   <!-- Profile & Account -->
   <section id="profileView" class="view" data-view="profile" hidden>
     <header class="view-header">
-      <button class="back-button" type="button" data-back aria-label="Back to home">
+      <button class="back-button" type="button" data-back aria-label="Back to home" data-i18n-attr="aria-label:common.backHome">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
       </button>
-      <h2>Profile &amp; Account</h2>
+      <h2 data-i18n="home.profileTitle">Profile &amp; Account</h2>
       <span id="profileSaveState" class="save-state" aria-live="polite"></span>
     </header>
     <p class="save-error" data-save-error role="alert" hidden></p>
@@ -360,8 +362,8 @@
           <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
         </span>
         <div>
-          <p class="intro-title">Profile &amp; Account</p>
-          <p class="intro-detail">Your account and learning preferences.</p>
+          <p class="intro-title" data-i18n="home.profileTitle">Profile &amp; Account</p>
+          <p class="intro-detail" data-i18n="profile.intro">Your account and learning preferences.</p>
         </div>
       </section>
 
@@ -372,55 +374,55 @@
             <span id="profileInitials" class="avatar-initials" aria-hidden="true"></span>
           </span>
           <span class="profile-text">
-            <span id="profileName" class="profile-name">Loading…</span>
+            <span id="profileName" class="profile-name" data-i18n="common.loading">Loading…</span>
             <span id="profileEmail" class="profile-email"></span>
             <span id="profileUsername" class="profile-username"></span>
           </span>
           <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
         </button>
         <form id="usernameForm" class="username-form" novalidate hidden>
-          <label class="setting-label" for="usernameInput">Username</label>
+          <label class="setting-label" for="usernameInput" data-i18n="profile.username">Username</label>
           <div class="username-field">
             <span class="username-at" aria-hidden="true">@</span>
             <input id="usernameInput" class="text-input" type="text" autocomplete="username" spellcheck="false"
               minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" aria-describedby="usernameMessage" />
           </div>
           <p id="usernameMessage" class="field-message" aria-live="polite"></p>
-          <p class="field-hint">3–20 letters, numbers or underscores. Your name and picture come from Google.</p>
+          <p class="field-hint" data-i18n="profile.usernameHint">3–20 letters, numbers or underscores. Your name and picture come from Google.</p>
           <div class="username-actions">
-            <button id="usernameCancelButton" class="btn btn-soft btn-small" type="button">Cancel</button>
-            <button id="usernameSaveButton" class="btn btn-primary btn-small" type="submit">Save</button>
+            <button id="usernameCancelButton" class="btn btn-soft btn-small" type="button" data-i18n="common.cancel">Cancel</button>
+            <button id="usernameSaveButton" class="btn btn-primary btn-small" type="submit" data-i18n="common.save">Save</button>
           </div>
         </form>
       </section>
 
       <div id="profileError" class="error-card" hidden>
         <p id="profileErrorText"></p>
-        <button id="profileRetryButton" class="btn btn-soft btn-small" type="button">Try again</button>
+        <button id="profileRetryButton" class="btn btn-soft btn-small" type="button" data-i18n="common.tryAgain">Try again</button>
       </div>
 
       <section id="profilePreferences" class="card preferences-card" hidden>
         <p class="group-label">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h8M8 3v2M5.5 5c1 4 4 7 7 8.5M10.5 5c-1 4-4 7-6.5 8.5" /><path d="m12 21 4.5-10 4.5 10M13.5 18h6" /></svg>
-          Learning preferences
+          <span data-i18n="profile.learningPreferences">Learning preferences</span>
         </p>
-        <label class="setting-label" for="nativeSelect">Native language</label>
+        <label class="setting-label" for="nativeSelect" data-i18n="profile.native">Native language</label>
         <select id="nativeSelect" class="select"></select>
-        <label class="setting-label" for="learningSelect">Learning language</label>
+        <label class="setting-label" for="learningSelect" data-i18n="profile.learning">Learning language</label>
         <select id="learningSelect" class="select"></select>
-        <label class="setting-label" for="levelSelect">Proficiency level</label>
+        <label class="setting-label" for="levelSelect" data-i18n="profile.level">Proficiency level</label>
         <select id="levelSelect" class="select"></select>
-        <label class="setting-label" for="goalSelect">Learning goal</label>
+        <label class="setting-label" for="goalSelect" data-i18n="profile.goal">Learning goal</label>
         <select id="goalSelect" class="select"></select>
         <div class="slider-row">
-          <label class="setting-label" for="dailyGoalInput">Daily goal <span class="optional">(optional)</span></label>
+          <label class="setting-label" for="dailyGoalInput"><span data-i18n="common.dailyGoal">Daily goal</span> <span class="optional" data-i18n="profile.optional">(optional)</span></label>
           <output id="dailyGoalValue" class="slider-value" for="dailyGoalInput">Off</output>
         </div>
         <input id="dailyGoalInput" class="slider" type="range" min="0" max="240" step="5" value="0" aria-describedby="dailyGoalHint" />
-        <p id="dailyGoalHint" class="field-hint">Minutes of video you watch with Lamiss each day. Slide to the left for no goal.</p>
+        <p id="dailyGoalHint" class="field-hint" data-i18n="profile.dailyGoalHint">Minutes of video you watch with Lamiss each day. Slide to the left for no goal.</p>
         <div id="profileProgress" class="progress" hidden>
           <div class="progress-row">
-            <span class="progress-label">Practice</span>
+            <span class="progress-label" data-i18n="profile.practice">Practice</span>
             <span id="profileProgressText" class="progress-text"></span>
           </div>
           <span class="progress-bar" aria-hidden="true"><span id="profileProgressFill" class="progress-fill"></span></span>
@@ -429,12 +431,13 @@
 
       <button id="signOutButton" class="btn btn-danger btn-block" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5M21 12H9" /></svg>
-        <span>Log Out</span>
+        <span data-i18n="profile.logOut">Log Out</span>
       </button>
     </div>
   </section>
 
   <script src="../shared/lamiss-config.js"></script>
+  <script src="../shared/lamiss-i18n.js"></script>
   <script src="../shared/lamiss-api.js"></script>
   <script src="../shared/lamiss-auth.js"></script>
   <script src="popup-shared.js"></script>

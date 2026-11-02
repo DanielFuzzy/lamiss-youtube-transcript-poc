@@ -32,13 +32,13 @@ const profileLearningSelect = popupElement<HTMLSelectElement>('learningSelect');
 const profileLevelSelect = popupElement<HTMLSelectElement>('levelSelect');
 const profileSignOutButton = popupElement<HTMLButtonElement>('signOutButton');
 
-const PROFILE_LEVELS: ReadonlyArray<{ level: LamissProficiencyLevel; label: string }> = [
-  { level: 'A1', label: 'A1 · Beginner' },
-  { level: 'A2', label: 'A2 · Elementary' },
-  { level: 'B1', label: 'B1 · Intermediate' },
-  { level: 'B2', label: 'B2 · Upper intermediate' },
-  { level: 'C1', label: 'C1 · Advanced' },
-  { level: 'C2', label: 'C2 · Proficient' }
+const PROFILE_LEVELS: ReadonlyArray<{ level: LamissProficiencyLevel; label: LamissMessageKey }> = [
+  { level: 'A1', label: 'profile.levelA1' },
+  { level: 'A2', label: 'profile.levelA2' },
+  { level: 'B1', label: 'profile.levelB1' },
+  { level: 'B2', label: 'profile.levelB2' },
+  { level: 'C1', label: 'profile.levelC1' },
+  { level: 'C2', label: 'profile.levelC2' }
 ];
 
 let profileSigningOut = false;
@@ -72,11 +72,12 @@ profileAvatar.addEventListener('error', () => {
 });
 
 function renderProfilePreferences(preferences: LamissPreferences): void {
-  fillLanguageSelect(profileNativeSelect, 'Not set', preferences.nativeLanguage);
-  fillLanguageSelect(profileLearningSelect, 'Not set', preferences.learningLanguage);
-  profileLevelSelect.replaceChildren(new Option('Not set', ''), ...PROFILE_LEVELS.map(entry => new Option(entry.label, entry.level)));
+  const notSet = lamissT('common.notSet');
+  fillLanguageSelect(profileNativeSelect, notSet, preferences.nativeLanguage);
+  fillLanguageSelect(profileLearningSelect, notSet, preferences.learningLanguage);
+  profileLevelSelect.replaceChildren(new Option(notSet, ''), ...PROFILE_LEVELS.map(entry => new Option(lamissT(entry.label), entry.level)));
   profileLevelSelect.value = preferences.proficiencyLevel ?? '';
-  profileGoalSelect.replaceChildren(new Option('Not set', ''), ...LAMISS_LEARNING_GOALS.map(entry => new Option(entry.label, entry.goal)));
+  profileGoalSelect.replaceChildren(new Option(notSet, ''), ...LAMISS_LEARNING_GOALS.map(entry => new Option(entry.label(), entry.goal)));
   profileGoalSelect.value = preferences.learningGoal ?? '';
   renderProfileDailyGoal(preferences.dailyGoalMinutes ?? null);
 }
@@ -201,7 +202,7 @@ function renderUsernameBusy(): void {
   profileUsernameInput.readOnly = profileSavingUsername;
   profileUsernameSave.disabled = profileSavingUsername;
   profileUsernameCancel.disabled = profileSavingUsername;
-  profileUsernameSave.textContent = profileSavingUsername ? 'Saving…' : 'Save';
+  profileUsernameSave.textContent = lamissT(profileSavingUsername ? 'save.saving' : 'common.save');
 }
 
 profileEditButton.addEventListener('click', () => {
@@ -284,11 +285,11 @@ profileSignOutButton.addEventListener('click', async () => {
   }
   profileSigningOut = true;
   profileSignOutButton.disabled = true;
-  profileSignOutButton.querySelector('span')!.textContent = 'Logging out…';
+  profileSignOutButton.querySelector('span')!.textContent = lamissT('profile.loggingOut');
   await chrome.runtime.sendMessage({ type: LAMISS_SIGN_OUT_MESSAGE }).catch(() => undefined);
   profileSigningOut = false;
   profileSignOutButton.disabled = false;
-  profileSignOutButton.querySelector('span')!.textContent = 'Log Out';
+  profileSignOutButton.querySelector('span')!.textContent = lamissT('profile.logOut');
   await refreshPopupAuth();
   showPopupView('home');
 });

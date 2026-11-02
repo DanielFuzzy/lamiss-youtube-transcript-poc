@@ -1,5 +1,6 @@
 // Lamiss backend calls shared by the extension pages (popup and in-page chat).
-// Loaded as a plain script before each page's own script; extension pages hold
+// Loaded as a plain script after shared/lamiss-i18n.js (its messages follow the
+// app language) and before each page's own script; extension pages hold
 // the backend's host permission, so they call the backend directly. The
 // content script loads it too, but never shared/lamiss-auth.js: there every
 // call goes out without a token, so a content script is always signed out.
@@ -38,8 +39,14 @@ type LamissSignInResult =
 
 type LamissSignInFailure = 'cancelled' | 'interaction_required' | 'state_mismatch' | 'nonce_mismatch' | 'not_configured' | 'rejected' | 'failed';
 
-const LAMISS_SIGN_IN_REQUIRED_MESSAGE = 'Sign in to use Lamiss.';
-const LAMISS_SIGN_IN_AGAIN_MESSAGE = 'Please sign in again.';
+// Functions, not constants: they follow the app language at the time they are shown.
+function lamissSignInRequiredMessage(): string {
+  return lamissT('common.signInRequired');
+}
+
+function lamissSignInAgainMessage(): string {
+  return lamissT('common.signInAgain');
+}
 
 // Where calls get the access token, and what a rejected token triggers.
 // shared/lamiss-auth.js replaces both where it is loaded (the worker, popup
@@ -167,7 +174,9 @@ function isFromExtensionPage(sender: chrome.runtime.MessageSender): boolean {
     && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
 }
 
-const LAMISS_UNREACHABLE_MESSAGE = `Could not reach Lamiss at ${LAMISS_API_BASE_URL}. Check your connection and try again.`;
+function lamissUnreachableMessage(): string {
+  return lamissT('common.unreachable', { url: LAMISS_API_BASE_URL });
+}
 
 // signInRequired: the backend answered 401, so only signing in again helps.
 type LamissCallResult<T> =
@@ -217,7 +226,7 @@ async function lamissUnauthorized(rejectedToken: string | undefined): Promise<{ 
   return {
     ok: false,
     status: 401,
-    error: tokenSent ? LAMISS_SIGN_IN_AGAIN_MESSAGE : LAMISS_SIGN_IN_REQUIRED_MESSAGE,
+    error: tokenSent ? lamissSignInAgainMessage() : lamissSignInRequiredMessage(),
     retryable: false,
     signInRequired: true
   };
@@ -255,7 +264,7 @@ async function callLamiss<T>(path: string, init: RequestInit, options: LamissCal
     return { ok: true, data: await response.json() as T };
   } catch (error) {
     console.error('Lamiss POC: backend unreachable:', path, error);
-    return { ok: false, error: LAMISS_UNREACHABLE_MESSAGE, retryable: true };
+    return { ok: false, error: lamissUnreachableMessage(), retryable: true };
   }
 }
 
@@ -358,7 +367,7 @@ async function synthesizeSpeech(text: string, language?: string, accessToken?: s
     }
     return { ok: true, data: await response.blob() };
   } catch {
-    return { ok: false, error: LAMISS_UNREACHABLE_MESSAGE, retryable: true };
+    return { ok: false, error: lamissUnreachableMessage(), retryable: true };
   }
 }
 
@@ -448,7 +457,8 @@ async function openMicrophone(): Promise<MediaStream | null> {
 
 // --- Settings (TDR-0002) ---------------------------------------------------------
 
-// The languages the backend knows (its Language enum), as ISO 639-1 codes.
+// The languages the backend knows (its Language enum), as ISO 639-1 codes,
+// with their English names. Shown in the app language (lamissLanguageName).
 const LAMISS_LANGUAGES: ReadonlyArray<{ code: string; name: string }> = [
   { code: 'en', name: 'English' },
   { code: 'es', name: 'Spanish' },
@@ -482,8 +492,24 @@ const LAMISS_LANGUAGES: ReadonlyArray<{ code: string; name: string }> = [
   { code: 'id', name: 'Indonesian' }
 ];
 
+// The language's name in the app language, as it reads inside a sentence
+// ("inglés" in Spanish); the English name where Intl can't name it.
 function lamissLanguageName(code: string | null | undefined): string {
-  return LAMISS_LANGUAGES.find(language => language.code === code)?.name ?? (code ?? '');
+  const english = LAMISS_LANGUAGES.find(language => language.code === code)?.name ?? (code ?? '');
+  if (!code || lamissAppLanguage === 'en') {
+    return english;
+  }
+  try {
+    return new Intl.DisplayNames([lamissAppLanguage], { type: 'language' }).of(code) ?? english;
+  } catch {
+    return english;
+  }
+}
+
+// The same name as a list entry: capitalized ("Inglés").
+function lamissLanguageLabel(code: string | null | undefined): string {
+  const name = lamissLanguageName(code);
+  return name.charAt(0).toLocaleUpperCase(lamissAppLanguage) + name.slice(1);
 }
 
 type LamissProficiencyLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
@@ -496,6 +522,10 @@ type LamissLearningGoal = 'CONVERSATION' | 'VOCABULARY' | 'GRAMMAR' | 'LISTENING
 type LamissPreferences = {
   nativeLanguage: string | null;
   learningLanguage: string | null;
+  // The language the tutor asks, explains and gives feedback in (TDR-0003);
+  // null: the video's language. Never derived from the caption language.
+  // Optional: a backend before TDR-0003 only knows tutor.explanationLanguage.
+  tutorLanguage?: string | null;
   proficiencyLevel: LamissProficiencyLevel | null;
   // null: no goal.
   learningGoal?: LamissLearningGoal | null;
@@ -505,8 +535,9 @@ type LamissPreferences = {
     kindness: LamissKindness;
     responseLength: LamissResponseLength;
     encouragement: boolean;
-    // null: the video's language.
-    explanationLanguage: string | null;
+    // tutorLanguage's earlier name, still sent by the backend with the same
+    // value. Read through lamissTutorLanguage; never sent back (savePreferences).
+    explanationLanguage?: string | null;
     // Pause the video while Lamiss asks (the backend reads back true when not set).
     autoPause?: boolean;
   };
@@ -534,12 +565,20 @@ function fetchPreferences(): Promise<LamissCallResult<LamissPreferences>> {
   return callLamiss<LamissPreferences>('/api/me/preferences', { headers: { accept: 'application/json' } });
 }
 
-// Always the full object; the backend answers with what it saved.
+// The tutor language, from either name the backend may use for it.
+function lamissTutorLanguage(preferences: LamissPreferences): string | null {
+  return preferences.tutorLanguage !== undefined ? preferences.tutorLanguage : preferences.tutor.explanationLanguage ?? null;
+}
+
+// Always the full object; the backend answers with what it saved. Only
+// tutorLanguage is sent: a stale explanationLanguage left next to a cleared
+// tutorLanguage would otherwise set it again.
 function savePreferences(preferences: LamissPreferences): Promise<LamissCallResult<LamissPreferences>> {
+  const { explanationLanguage: _legacy, ...tutor } = preferences.tutor;
   return callLamiss<LamissPreferences>('/api/me/preferences', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify(preferences)
+    body: JSON.stringify({ ...preferences, tutorLanguage: lamissTutorLanguage(preferences), tutor })
   });
 }
 
@@ -553,12 +592,12 @@ function fetchProfile(): Promise<LamissCallResult<LamissProfile>> {
 
 // --- Goals and profile editing (TDR-0002 addendum) ----------------------------------
 
-const LAMISS_LEARNING_GOALS: ReadonlyArray<{ goal: LamissLearningGoal; label: string }> = [
-  { goal: 'CONVERSATION', label: 'Conversation' },
-  { goal: 'VOCABULARY', label: 'Vocabulary' },
-  { goal: 'GRAMMAR', label: 'Grammar' },
-  { goal: 'LISTENING', label: 'Listening' },
-  { goal: 'PRONUNCIATION', label: 'Pronunciation' }
+const LAMISS_LEARNING_GOALS: ReadonlyArray<{ goal: LamissLearningGoal; label: () => string }> = [
+  { goal: 'CONVERSATION', label: () => lamissT('goal.CONVERSATION') },
+  { goal: 'VOCABULARY', label: () => lamissT('goal.VOCABULARY') },
+  { goal: 'GRAMMAR', label: () => lamissT('goal.GRAMMAR') },
+  { goal: 'LISTENING', label: () => lamissT('goal.LISTENING') },
+  { goal: 'PRONUNCIATION', label: () => lamissT('goal.PRONUNCIATION') }
 ];
 
 const LAMISS_DAILY_GOAL_MIN_MINUTES = 5;
@@ -573,7 +612,7 @@ function dailyGoalFromSlider(value: number): number | null {
 }
 
 function formatDailyGoal(minutes: number | null | undefined): string {
-  return minutes ? `${minutes} min` : 'Off';
+  return minutes ? lamissT('common.minutes', { minutes }) : lamissT('common.off');
 }
 
 type LamissPracticeToday = { date: string; practicedMinutes: number; goalMinutes: number | null };
@@ -609,7 +648,7 @@ function describePracticeProgress(practice: LamissPracticeToday | undefined): { 
   }
   const practiced = Math.max(0, Math.floor(practice.practicedMinutes || 0));
   return {
-    text: `${practiced} of ${goal} min today`,
+    text: lamissT('practice.progress', { practiced, goal }),
     fraction: Math.min(1, practiced / goal),
     done: practiced >= goal
   };
@@ -617,11 +656,13 @@ function describePracticeProgress(practice: LamissPracticeToday | undefined): { 
 
 // Same rules as the backend's domain.Username (TDR-0002 decision 12).
 const LAMISS_USERNAME_PATTERN = /^[A-Za-z0-9_]{3,20}$/;
-const LAMISS_USERNAME_RULES = 'Use 3–20 letters, numbers or underscores.';
+function lamissUsernameRules(): string {
+  return lamissT('username.rules');
+}
 
 // Why a username can't be saved, or undefined when it can.
 function usernameProblem(username: string): string | undefined {
-  return LAMISS_USERNAME_PATTERN.test(username) ? undefined : LAMISS_USERNAME_RULES;
+  return LAMISS_USERNAME_PATTERN.test(username) ? undefined : lamissUsernameRules();
 }
 
 function updateUsername(username: string): Promise<LamissCallResult<LamissProfile>> {
@@ -635,10 +676,10 @@ function updateUsername(username: string): Promise<LamissCallResult<LamissProfil
 // A friendly message for a failed username change.
 function describeUsernameFailure(result: { ok: false; status?: number; error: string; errorCode?: string }): string {
   if (result.status === 409 || result.errorCode === 'username_taken') {
-    return 'That username is already taken. Try another one.';
+    return lamissT('username.taken');
   }
   if (result.errorCode === 'invalid_username') {
-    return LAMISS_USERNAME_RULES;
+    return lamissUsernameRules();
   }
   return result.error;
 }

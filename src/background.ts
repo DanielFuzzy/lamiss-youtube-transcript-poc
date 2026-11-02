@@ -1,6 +1,8 @@
 // The worker is a classic script, so it shares the backend helpers this way.
 declare function importScripts(...urls: string[]): void;
-importScripts('shared/lamiss-config.js', 'shared/lamiss-api.js', 'shared/lamiss-auth.js');
+importScripts('shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'shared/lamiss-auth.js');
+// The messages the worker sends to the pages follow the app language.
+void loadAppLanguage();
 
 // ---------------------------------------------------------------------------
 // Who may talk to the worker. Only this extension: its own pages (popup, chat,
@@ -126,7 +128,7 @@ type TranscriptIngestOutcome = {
 async function ingestTranscript(payload: TranscriptIngestPayload): Promise<TranscriptIngestOutcome> {
   const accessToken = await readAccessToken();
   if (!accessToken) {
-    return { ok: false, status: 401, error: LAMISS_SIGN_IN_REQUIRED_MESSAGE, signInRequired: true };
+    return { ok: false, status: 401, error: lamissSignInRequiredMessage(), signInRequired: true };
   }
   try {
     const response = await fetch(LAMISS_TRANSCRIPT_INGEST_ENDPOINT, withAuthorization({
@@ -670,7 +672,8 @@ const WEBSOCKET_UNAUTHENTICATED = 4401;
 
 type LamissServerMessage =
   | { type: 'PAUSE_VIDEO' }
-  | { type: 'ASK_QUESTION'; eventId: string; question: string }
+  // language: the ISO 639-1 code the question is written in (the tutor language, TDR-0003), or null.
+  | { type: 'ASK_QUESTION'; eventId: string; question: string; language?: string | null }
   // language: the ISO 639-1 code the feedback is written in (TDR-0002), or null.
   | { type: 'FEEDBACK'; correct: boolean; feedback: string; language?: string | null }
   | { type: 'RESUME_VIDEO' }
@@ -713,7 +716,7 @@ type LamissSpeechEvent = { type: 'started' } | { type: 'ended' } | { type: 'fail
 
 // paused: whether PAUSE_VIDEO came before it (the user's auto-pause was on);
 // missing in records stored before auto-pause could be turned off.
-type LamissPendingQuestion = { eventId: string; question: string; paused?: boolean };
+type LamissPendingQuestion = { eventId: string; question: string; language?: string | null; paused?: boolean };
 
 type LamissLiveConnection = {
   port: chrome.runtime.Port;
@@ -835,7 +838,7 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
     return;
   }
   if (!accessToken) {
-    postLive(live, { type: 'status', state: 'failed', detail: LAMISS_SIGN_IN_REQUIRED_MESSAGE });
+    postLive(live, { type: 'status', state: 'failed', detail: lamissSignInRequiredMessage() });
     return;
   }
 
@@ -894,7 +897,7 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
         if (pending.paused !== false) {
           postLive(live, { type: 'server', message: { type: 'PAUSE_VIDEO' } });
         }
-        postLive(live, { type: 'server', message: { type: 'ASK_QUESTION', eventId: pending.eventId, question: pending.question } });
+        postLive(live, { type: 'server', message: { type: 'ASK_QUESTION', eventId: pending.eventId, question: pending.question, language: pending.language } });
       }
     });
   });
@@ -913,7 +916,8 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
     } else if (message.type === 'ASK_QUESTION') {
       const paused = live.pauseRequested === true;
       live.pauseRequested = false;
-      void chrome.storage.local.set({ [pendingQuestionKey(learningSessionId)]: { eventId: message.eventId, question: message.question, paused } });
+      const pending: LamissPendingQuestion = { eventId: message.eventId, question: message.question, language: message.language, paused };
+      void chrome.storage.local.set({ [pendingQuestionKey(learningSessionId)]: pending });
       postLiveLog(live, { type: 'lamiss-asked', question: message.question });
     } else if (message.type === 'FEEDBACK') {
       // Feedback means the backend has stored the answer.
@@ -962,7 +966,7 @@ async function onLiveUnauthenticated(live: LamissLiveConnection, socketToken: st
     return;
   }
   console.error('Lamiss POC: Lamiss did not accept the sign-in for the live connection');
-  postLive(live, { type: 'status', state: 'failed', detail: LAMISS_SIGN_IN_AGAIN_MESSAGE });
+  postLive(live, { type: 'status', state: 'failed', detail: lamissSignInAgainMessage() });
   await lamissOnSessionRejected(socketToken);
 }
 
@@ -1191,7 +1195,7 @@ lamissOnSessionRejected = async (rejectedToken) => {
 async function readAccessTokenForOffscreen(): Promise<string> {
   const accessToken = await readAccessToken();
   if (!accessToken) {
-    throw new Error(LAMISS_SIGN_IN_REQUIRED_MESSAGE);
+    throw new Error(lamissSignInRequiredMessage());
   }
   return accessToken;
 }
@@ -1359,7 +1363,7 @@ async function signOutOfLamiss(): Promise<LamissAuthState> {
   await clearAuthSession();
   await chrome.storage.local.remove(LAMISS_SIGNED_IN_BEFORE_KEY);
   await removePendingQuestions();
-  closeAllLiveConnections(LAMISS_SIGN_IN_REQUIRED_MESSAGE);
+  closeAllLiveConnections(lamissSignInRequiredMessage());
   const signedOut: LamissAuthState = { status: 'signedOut' };
   await broadcastAuthState(signedOut);
   if (accessToken) {

@@ -312,7 +312,9 @@ function primaryLanguageSubtag(languageCode: string): string {
   return languageCode.split('-')[0].toLowerCase();
 }
 
-// The transcript's language comes from the video, not from the user: it's the
+// The caption language (captionLanguage in TDR-0003): the transcript Lamiss
+// reads. It comes from the video, never from the user's app or tutor language
+// (those only change what Lamiss shows and how the tutor speaks): it's the
 // language of the audio being played, so the transcript matches what the
 // viewer hears (the original or one of YouTube's dubs). Within that language a
 // creator-made track beats the auto-generated one. Without audio-language info
@@ -375,17 +377,30 @@ const LAMISS_PAGE_BUTTON_ID = 'lamiss-start-button';
 
 type LamissButtonState = 'idle' | 'loading' | 'ready' | 'error' | 'signed-out' | 'signing-in';
 
-const LAMISS_BUTTON_LABELS: Record<LamissButtonState, string> = {
-  idle: 'Start using Lamiss',
-  loading: 'Loading transcript…',
-  ready: 'Lamiss is ready',
-  error: 'Retry Lamiss',
-  'signed-out': 'Sign in to use Lamiss',
-  'signing-in': 'Signing in…'
+const LAMISS_BUTTON_LABELS: Record<LamissButtonState, LamissMessageKey> = {
+  idle: 'page.start',
+  loading: 'page.loadingTranscript',
+  ready: 'page.ready',
+  error: 'page.retry',
+  'signed-out': 'chat.signInTitle',
+  'signing-in': 'common.signingIn'
 };
 
-const LAMISS_BUTTON_IDLE_DETAIL = 'Send this video\'s transcript to Lamiss';
-const LAMISS_BUTTON_SIGNED_OUT_DETAIL = 'Sign in with Google to use Lamiss';
+// The button's tooltip. A function, so it follows the app language (TDR-0003)
+// until the state changes; errors from elsewhere are shown as they came.
+type LamissButtonDetail = () => string;
+
+function lamissDetail(key: LamissMessageKey, then?: LamissMessageKey): LamissButtonDetail {
+  return () => then ? `${lamissT(key)}. ${lamissT(then)}` : lamissT(key);
+}
+
+function lamissPlainDetail(text: string): LamissButtonDetail {
+  return () => text;
+}
+
+const LAMISS_BUTTON_IDLE_DETAIL = lamissDetail('page.idleDetail');
+const LAMISS_BUTTON_SIGNED_OUT_DETAIL = lamissDetail('page.signedOutDetail');
+const LAMISS_BUTTON_READY_DETAIL = lamissDetail('page.toggleChat');
 
 const LAMISS_CHAT_FRAME_ID = 'lamiss-chat-frame';
 
@@ -445,11 +460,11 @@ type LamissBadgeState = 'monitoring' | 'connecting' | 'question' | 'error';
 
 const LAMISS_BADGE_ERROR_FLASH_MS = 5000;
 
-const LAMISS_BADGE_DETAILS: Record<LamissBadgeState, string> = {
-  monitoring: 'Lamiss is connected and following the video',
-  connecting: 'Reconnecting to Lamiss…',
-  question: 'Lamiss is asking you a question',
-  error: 'Lamiss had a problem'
+const LAMISS_BADGE_DETAILS: Record<LamissBadgeState, LamissMessageKey> = {
+  monitoring: 'page.badgeMonitoring',
+  connecting: 'page.badgeConnecting',
+  question: 'page.badgeQuestion',
+  error: 'page.badgeError'
 };
 
 // Set once this video's live session first hears back from Lamiss.
@@ -485,11 +500,11 @@ function renderLamissButton(button: HTMLButtonElement): void {
     }
   }
   // As a badge the label is hidden, so the name moves to aria-label.
-  const detail = badge ? `${LAMISS_BADGE_DETAILS[badge]}. Click to show or hide the chat` : lamissButtonDetail;
+  const detail = badge ? `${lamissT(LAMISS_BADGE_DETAILS[badge])}. ${lamissT('page.toggleChat')}` : lamissButtonDetail();
   if (button.title !== detail) {
     button.title = detail;
   }
-  const accessibleName = badge ? `Lamiss: ${LAMISS_BADGE_DETAILS[badge]}` : null;
+  const accessibleName = badge ? `Lamiss: ${lamissT(LAMISS_BADGE_DETAILS[badge])}` : null;
   if (button.getAttribute('aria-label') !== accessibleName) {
     if (accessibleName) {
       button.setAttribute('aria-label', accessibleName);
@@ -498,7 +513,7 @@ function renderLamissButton(button: HTMLButtonElement): void {
     }
   }
   const label = button.querySelector('.lamiss-start-button__label');
-  const text = LAMISS_BUTTON_LABELS[lamissButtonState];
+  const text = lamissT(LAMISS_BUTTON_LABELS[lamissButtonState]);
   if (label && label.textContent !== text) {
     label.textContent = text;
   }
@@ -569,7 +584,7 @@ function ensureLamissChat(): void {
   const frame = document.createElement('iframe');
   frame.id = LAMISS_CHAT_FRAME_ID;
   frame.className = 'lamiss-chat-frame';
-  frame.title = 'Lamiss chat';
+  frame.title = lamissT('page.chatFrame');
   frame.allow = 'microphone';
   frame.dataset.videoId = videoId;
   frame.src = chrome.runtime.getURL(`chat/chat.html?${query}`);
@@ -603,7 +618,7 @@ function scheduleEnsureLamissButton(): void {
   });
 }
 
-function setLamissButtonState(state: LamissButtonState, detail: string): void {
+function setLamissButtonState(state: LamissButtonState, detail: LamissButtonDetail): void {
   lamissButtonState = state;
   lamissButtonDetail = detail;
   const button = document.getElementById(LAMISS_PAGE_BUTTON_ID) as HTMLButtonElement | null;
@@ -638,16 +653,16 @@ function sendTranscriptIngestRequest(payload: TranscriptIngestPayload): Promise<
 
 // The worker opens Google's sign-in window and keeps the result.
 async function signInFromLamissButton(): Promise<void> {
-  setLamissButtonState('signing-in', 'Continue in the Google window');
+  setLamissButtonState('signing-in', lamissDetail('common.continueInGoogle'));
   const result = await chrome.runtime.sendMessage({ type: LAMISS_SIGN_IN_MESSAGE })
     .catch((error: unknown) => ({ ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) })) as LamissSignInResult | undefined;
   if (result?.ok) {
     applyLamissAuthStatus('signedIn');
     return;
   }
-  setLamissButtonState('signed-out', result?.error ?? 'Sign-in failed. Click to try again');
+  setLamissButtonState('signed-out', result?.error ? lamissPlainDetail(result.error) : lamissDetail('page.signInFailedRetry'));
   if (result?.reason !== 'cancelled') {
-    showLamissToast(result?.error ?? 'Sign-in failed. Please try again.');
+    showLamissToast(result?.error ?? lamissT('common.signInFailed'));
   }
 }
 
@@ -660,7 +675,7 @@ function applyLamissAuthStatus(status: LamissAuthState['status']): void {
     const resume = lamissResumeAfterSignIn;
     lamissResumeAfterSignIn = undefined;
     if (resume && resume.videoId === lamissButtonVideoId) {
-      setLamissButtonState('ready', 'Click to show or hide the chat');
+      setLamissButtonState('ready', LAMISS_BUTTON_READY_DETAIL);
       startLamissLive(resume.videoId, resume.language);
     } else {
       setLamissButtonState('idle', LAMISS_BUTTON_IDLE_DETAIL);
@@ -670,12 +685,12 @@ function applyLamissAuthStatus(status: LamissAuthState['status']): void {
   }
 
   if (lamissButtonState === 'ready' && lamissButtonVideoId) {
-    lamissResumeAfterSignIn = { videoId: lamissButtonVideoId, language: lamissLiveLanguage };
+    lamissResumeAfterSignIn = { videoId: lamissButtonVideoId, language: lamissCaptionLanguage };
   }
   stopLamissLive();
   if (lamissButtonState !== 'signing-in') {
     setLamissButtonState('signed-out', status === 'expired'
-      ? 'Your Lamiss session ended. Click to sign in again'
+      ? lamissDetail('page.sessionEnded')
       : LAMISS_BUTTON_SIGNED_OUT_DETAIL);
   }
   ensureLamissChat();
@@ -739,13 +754,13 @@ async function onLamissButtonClick(): Promise<void> {
 
   const clickedVideoId = lamissButtonVideoId;
   // Ignore the outcome if the user navigated to another video meanwhile.
-  const finish = (state: LamissButtonState, detail: string) => {
+  const finish = (state: LamissButtonState, detail: LamissButtonDetail) => {
     if (lamissButtonVideoId === clickedVideoId) {
       setLamissButtonState(state, detail);
     }
   };
 
-  setLamissButtonState('loading', 'Loading the transcript and sending it to Lamiss…');
+  setLamissButtonState('loading', lamissDetail('page.loadingDetail'));
 
   try {
     const tabId = await getOwnTabId();
@@ -755,7 +770,7 @@ async function onLamissButtonClick(): Promise<void> {
     });
 
     if (!transcript.success) {
-      finish('error', transcript.error ?? 'Transcript failed');
+      finish('error', transcript.error ? lamissPlainDetail(transcript.error) : lamissDetail('page.transcriptFailed'));
       return;
     }
 
@@ -778,20 +793,21 @@ async function onLamissButtonClick(): Promise<void> {
         }
         return;
       }
-      finish('error', outcome.error ?? `Lamiss backend returned HTTP ${outcome.status}`);
+      const status = outcome.status;
+      finish('error', outcome.error ? lamissPlainDetail(outcome.error) : () => lamissT('page.backendHttp', { status: status ?? '' }));
       return;
     }
 
-    finish('ready', `${outcome.ingestStatus?.toUpperCase() === 'ALREADY_INGESTED'
-      ? 'This video\'s transcript was already in Lamiss'
-      : 'Transcript sent to Lamiss'}. Click to show or hide the chat`);
+    finish('ready', lamissDetail(outcome.ingestStatus?.toUpperCase() === 'ALREADY_INGESTED'
+      ? 'page.transcriptAlready'
+      : 'page.transcriptSent', 'page.toggleChat'));
     if (lamissButtonVideoId === clickedVideoId && clickedVideoId) {
       setLamissChatOpen(true);
       startLamissLive(clickedVideoId, loaded.language);
     }
   } catch (error) {
     console.error('Lamiss POC: in-page button error:', error);
-    finish('error', error instanceof Error ? error.message : String(error));
+    finish('error', lamissPlainDetail(error instanceof Error ? error.message : String(error)));
   }
 }
 
@@ -827,6 +843,11 @@ type LamissQuestionPhase =
 type LamissQuestionState = {
   eventId: string;
   question: string;
+  // The language the question is written in (the tutor language, TDR-0003),
+  // which picks the voice that reads it. Unknown from an older backend.
+  language?: string;
+  // Where the video was when it was asked, for the card's heading.
+  askedAtSeconds?: number;
   phase: LamissQuestionPhase;
   queued: boolean;
   answer?: string;
@@ -836,6 +857,8 @@ type LamissQuestionState = {
   listenDeadline?: number;
   resumeRequested?: boolean;
   speakingFeedback?: boolean;
+  // What Lamiss said about the answer, kept to show it again in another app language.
+  feedback?: { correct: boolean; text: string };
   // PAUSE_VIDEO came for this question: the video stays paused until it is
   // answered. Without it (auto-pause off) the video plays on, quieter.
   holdPaused: boolean;
@@ -843,7 +866,9 @@ type LamissQuestionState = {
 };
 
 let lamissLiveVideoId: string | undefined;
-let lamissLiveLanguage: string | undefined;
+// The video's caption language (TDR-0003): the transcript Lamiss reads, and
+// the fallback voice for text whose own language is unknown.
+let lamissCaptionLanguage: string | undefined;
 let lamissLivePort: chrome.runtime.Port | null = null;
 let lamissLiveState: LamissLiveState = 'connecting';
 let lamissLiveKeepalive: number | undefined;
@@ -872,7 +897,7 @@ function formatLamissPosition(seconds: number): string {
 }
 
 function startLamissLive(videoId: string, language: string | undefined): void {
-  lamissLiveLanguage = language;
+  lamissCaptionLanguage = language;
   if (lamissLiveVideoId === videoId) {
     return;
   }
@@ -960,7 +985,7 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
     }
     if (message.state === 'failed') {
       console.error('Lamiss POC: live questions are off:', message.detail);
-      showLamissToast(`Lamiss can't ask you questions here: ${message.detail ?? 'connection refused'}`);
+      showLamissToast(lamissT('page.noQuestionsHere', { detail: message.detail ?? lamissT('page.connectionRefused') }));
     }
     renderLamissQuestion();
     return;
@@ -992,7 +1017,7 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
       getLamissVideo()?.pause();
       break;
     case 'ASK_QUESTION':
-      showLamissQuestion(server.eventId, server.question);
+      showLamissQuestion(server.eventId, server.question, server.language ?? undefined);
       break;
     case 'FEEDBACK':
       showLamissFeedback(server.correct, server.feedback, server.language);
@@ -1131,7 +1156,7 @@ function updateLamissDucking(): void {
 let lamissSpeech: { requestId: string; text: string; language?: string; resolve: () => void } | null = null;
 
 // language picks the voice (ISO 639-1); by default the video's language.
-function speakLamiss(text: string, language: string | undefined = lamissLiveLanguage): Promise<void> {
+function speakLamiss(text: string, language: string | undefined = lamissCaptionLanguage): Promise<void> {
   stopLamissSpeech();
   if (!lamissLivePort) {
     return speakWithBrowserVoice(text, language);
@@ -1183,7 +1208,7 @@ function stopLamissSpeech(): void {
 }
 
 // The browser's built-in voice: robotic, but always available.
-function speakWithBrowserVoice(text: string, language: string | undefined = lamissLiveLanguage): Promise<void> {
+function speakWithBrowserVoice(text: string, language: string | undefined = lamissCaptionLanguage): Promise<void> {
   return new Promise((resolve) => {
     if (!text || !('speechSynthesis' in window)) {
       resolve();
@@ -1286,8 +1311,8 @@ function onLamissListenEvent(requestId: string, event: LamissListenEvent): void 
       question.phase = 'answering';
       window.clearInterval(lamissCountdownTimer);
       question.error = event.micDenied
-        ? 'Lamiss needs the microphone. Allow it in the tab that just opened, then tap the mic. You can also type your answer.'
-        : `I couldn't get your spoken answer (${event.error}). Tap the mic to try again, or type it.`;
+        ? lamissT('question.micNeeded')
+        : lamissT('question.spokenFailed', { error: event.error });
       break;
   }
   renderLamissQuestion();
@@ -1331,7 +1356,7 @@ function createLamissQuestion(): HTMLDivElement {
   const input = document.createElement('textarea');
   input.className = 'lamiss-question__input';
   input.rows = 3;
-  input.setAttribute('aria-label', 'Your answer');
+  input.setAttribute('aria-label', lamissT('question.yourAnswer'));
 
   const feedback = document.createElement('div');
   feedback.className = 'lamiss-question__feedback';
@@ -1406,7 +1431,7 @@ function lamissQuestionParts(): {
   };
 }
 
-function showLamissQuestion(eventId: string, question: string): void {
+function showLamissQuestion(eventId: string, question: string, language?: string): void {
   const holdPaused = lamissPauseRequested;
   lamissPauseRequested = false;
   // A reconnect replays the stored question; keep the conversation as it is.
@@ -1424,19 +1449,22 @@ function showLamissQuestion(eventId: string, question: string): void {
   hideLamissQuestion();
   player.append(createLamissQuestion());
 
-  const state: LamissQuestionState = { eventId, question, phase: 'speaking', queued: false, holdPaused };
+  const video = getLamissVideo();
+  const state: LamissQuestionState = {
+    eventId, question, phase: 'speaking', queued: false, holdPaused,
+    language: lamissSpeechLanguage(language, undefined),
+    askedAtSeconds: video?.currentTime
+  };
   lamissQuestion = state;
   const parts = lamissQuestionParts();
   if (!parts) {
     return;
   }
-  const video = getLamissVideo();
-  parts.heading.textContent = video ? `Lamiss asks · ${formatLamissPosition(video.currentTime)}` : 'Lamiss asks';
   parts.text.textContent = question;
   renderLamissQuestion();
 
-  // Ask aloud, then listen for the spoken answer.
-  void speakLamiss(question).then(() => {
+  // Ask aloud, in the question's own language, then listen for the spoken answer.
+  void speakLamiss(question, state.language ?? lamissCaptionLanguage).then(() => {
     if (lamissQuestion === state && state.phase === 'speaking') {
       startLamissListening();
     }
@@ -1458,29 +1486,27 @@ function lamissStatusText(question: LamissQuestionState): string {
     return '';
   }
   if (lamissLiveState === 'failed') {
-    return 'Lamiss is disconnected, so your answer can\'t be saved.';
+    return lamissT('question.disconnected');
   }
   if (lamissLiveState !== 'connected') {
-    return question.queued
-      ? 'Reconnecting to Lamiss… your answer will be sent as soon as it\'s back.'
-      : 'Reconnecting to Lamiss… your answer hasn\'t been saved yet.';
+    return lamissT(question.queued ? 'question.reconnectQueued' : 'question.reconnectNotSaved');
   }
   switch (question.phase) {
     case 'speaking':
-      return 'Lamiss is asking…';
+      return lamissT('question.asking');
     case 'listening': {
       if (!question.listenDeadline) {
-        return 'Opening the microphone…';
+        return lamissT('common.openingMic');
       }
       const seconds = Math.max(0, Math.ceil((question.listenDeadline - Date.now()) / 1000));
-      return `Listening… start answering (${seconds}s)`;
+      return lamissT('question.listeningCountdown', { seconds });
     }
     case 'recording':
-      return 'Listening… I\'ll stop when you finish talking.';
+      return lamissT('question.recording');
     case 'transcribing':
-      return 'Getting your answer…';
+      return lamissT('question.transcribing');
     case 'sending':
-      return 'Lamiss is checking your answer…';
+      return lamissT('question.checking');
     default:
       return question.error ?? '';
   }
@@ -1496,19 +1522,31 @@ function renderLamissQuestion(): void {
   const listening = phase === 'listening' || phase === 'recording';
   updateLamissDucking();
 
+  const heading = question.askedAtSeconds === undefined
+    ? lamissT('question.asks')
+    : lamissT('question.asksAt', { time: formatLamissPosition(question.askedAtSeconds) });
+  if (parts.heading.textContent !== heading) {
+    parts.heading.textContent = heading;
+  }
   parts.overlay.dataset.phase = phase;
   parts.overlay.dataset.playing = String(!question.holdPaused);
   parts.input.readOnly = !['speaking', 'listening', 'answering'].includes(phase);
-  parts.input.placeholder = listening || phase === 'speaking' ? 'Answer out loud, or type here…' : 'Type your answer…';
+  parts.input.placeholder = lamissT(listening || phase === 'speaking' ? 'question.placeholderSpeak' : 'question.placeholderType');
+  parts.input.setAttribute('aria-label', lamissT('question.yourAnswer'));
 
   parts.mic.hidden = !['speaking', 'answering', 'listening', 'recording'].includes(phase);
   parts.mic.dataset.state = listening ? 'listening' : 'idle';
   parts.mic.disabled = phase === 'speaking';
-  const micLabel = phase === 'recording' ? 'Done talking' : phase === 'listening' ? 'Stop listening' : 'Answer with your voice';
+  const micLabel = lamissT(phase === 'recording' ? 'question.doneTalking' : phase === 'listening' ? 'question.stopListening' : 'question.answerVoice');
   parts.mic.title = micLabel;
   parts.mic.setAttribute('aria-label', micLabel);
 
-  parts.submit.textContent = phase === 'feedback' ? (question.holdPaused ? 'Continue' : 'Close') : phase === 'sending' ? 'Checking…' : 'Answer';
+  parts.submit.textContent = lamissT(phase === 'feedback'
+    ? (question.holdPaused ? 'question.continue' : 'question.close')
+    : phase === 'sending' ? 'question.checkingShort' : 'question.answer');
+  if (phase === 'feedback' && question.feedback) {
+    parts.feedback.textContent = `${lamissT(question.feedback.correct ? 'question.correct' : 'question.notQuite')} ${question.feedback.text}`;
+  }
   parts.submit.disabled = phase === 'feedback'
     ? false
     : !['speaking', 'listening', 'answering'].includes(phase) || parts.input.value.trim().length === 0;
@@ -1568,7 +1606,7 @@ function submitLamissAnswer(answer: string, spokenLanguage?: string): void {
   postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer, language: spokenLanguage });
 }
 
-// language: what the backend wrote the feedback in (the learner's explanation
+// language: what the backend wrote the feedback in (the learner's tutor
 // language when set), so Lamiss reads it with a voice of that language.
 function showLamissFeedback(correct: boolean, feedback: string, language?: string | null): void {
   const parts = lamissQuestionParts();
@@ -1578,15 +1616,15 @@ function showLamissFeedback(correct: boolean, feedback: string, language?: strin
     return;
   }
   question.phase = 'feedback';
+  question.feedback = { correct, text: feedback };
   parts.feedback.hidden = false;
   parts.feedback.dataset.correct = String(correct);
-  parts.feedback.textContent = `${correct ? '✓ Correct. ' : '✗ Not quite. '}${feedback}`;
   renderLamissQuestion();
   parts.submit.focus();
 
   question.speakingFeedback = true;
   updateLamissDucking();
-  void speakLamiss(feedback, lamissSpeechLanguage(language, lamissLiveLanguage)).then(() => {
+  void speakLamiss(feedback, lamissSpeechLanguage(language, question.language ?? lamissCaptionLanguage)).then(() => {
     question.speakingFeedback = false;
     if (lamissQuestion !== question) {
       return;
@@ -1640,7 +1678,7 @@ function onLamissError(message: string): void {
   if (lamissQuestion?.phase === 'sending') {
     lamissQuestion.phase = 'answering';
     lamissQuestion.queued = false;
-    lamissQuestion.error = `Lamiss couldn't check your answer: ${message}. Try again.`;
+    lamissQuestion.error = lamissT('question.couldNotCheck', { error: message });
     renderLamissQuestion();
     return;
   }
@@ -1675,10 +1713,10 @@ function showLamissToast(text: string): void {
 const LAMISS_TIMER_ID = 'lamiss-question-timer';
 const LAMISS_SETTINGS_POPOVER_ID = 'lamiss-question-settings';
 const LAMISS_TIMER_TICK_MS = 250;
-const LAMISS_DIFFICULTY_CHOICES: { value: LamissQuestionDifficulty; label: string }[] = [
-  { value: 'EASY', label: 'Easy' },
-  { value: 'MEDIUM', label: 'Medium' },
-  { value: 'HARD', label: 'Hard' }
+const LAMISS_DIFFICULTY_CHOICES: { value: LamissQuestionDifficulty; label: LamissMessageKey }[] = [
+  { value: 'EASY', label: 'common.easy' },
+  { value: 'MEDIUM', label: 'common.medium' },
+  { value: 'HARD', label: 'common.hard' }
 ];
 
 // Undefined until the backend has said; reset whenever the connection drops.
@@ -1706,7 +1744,7 @@ function createLamissTimer(): HTMLButtonElement {
   timer.id = LAMISS_TIMER_ID;
   timer.type = 'button';
   timer.className = 'lamiss-question-timer';
-  timer.title = 'Time until Lamiss\'s next question. Click to change how often and how hard.';
+  timer.title = lamissT('timer.title');
   timer.setAttribute('aria-haspopup', 'dialog');
   timer.setAttribute('aria-expanded', 'false');
 
@@ -1730,38 +1768,38 @@ function createLamissTimer(): HTMLButtonElement {
 
 function lamissTimerText(): { text: string; state: string } {
   if (lamissLiveState === 'failed') {
-    return { text: 'Questions off', state: 'off' };
+    return { text: lamissT('timer.off'), state: 'off' };
   }
   if (lamissLiveState !== 'connected') {
-    return { text: 'Connecting…', state: 'idle' };
+    return { text: lamissT('timer.connecting'), state: 'idle' };
   }
   if (lamissQuestion) {
-    return { text: 'Lamiss is asking', state: 'now' };
+    return { text: lamissT('timer.asking'), state: 'now' };
   }
   if (!lamissNextQuestion) {
-    return { text: 'Next question…', state: 'idle' };
+    return { text: lamissT('timer.next'), state: 'idle' };
   }
   if (lamissNextQuestion.waitingForAnswer) {
-    return { text: 'Waiting for your answer', state: 'now' };
+    return { text: lamissT('timer.waiting'), state: 'now' };
   }
   if (lamissNextQuestion.atVideoMs === null) {
-    return { text: 'No more questions ahead', state: 'off' };
+    return { text: lamissT('timer.noMore'), state: 'off' };
   }
 
   const video = getLamissVideo();
   if (!video) {
-    return { text: 'Next question…', state: 'idle' };
+    return { text: lamissT('timer.next'), state: 'idle' };
   }
   // Video time to wall time: at 2x speed the question comes twice as soon.
   const remainingMs = (lamissNextQuestion.atVideoMs - video.currentTime * 1000) / (video.playbackRate || 1);
   if (remainingMs <= 0) {
-    return { text: 'Next question any second', state: 'soon' };
+    return { text: lamissT('timer.anySecond'), state: 'soon' };
   }
   const countdown = formatLamissPosition(Math.ceil(remainingMs / 1000));
   if (video.paused) {
-    return { text: `Next question in ${countdown} · paused`, state: 'paused' };
+    return { text: lamissT('timer.inPaused', { countdown }), state: 'paused' };
   }
-  return { text: `Next question in ${countdown}`, state: remainingMs <= 10_000 ? 'soon' : 'running' };
+  return { text: lamissT('timer.in', { countdown }), state: remainingMs <= 10_000 ? 'soon' : 'running' };
 }
 
 // How far the video has come towards the next question, 0 to 1; null when
@@ -1850,7 +1888,7 @@ function openLamissSettingsPopover(): void {
   popover.id = LAMISS_SETTINGS_POPOVER_ID;
   popover.className = 'lamiss-settings-popover';
   popover.setAttribute('role', 'dialog');
-  popover.setAttribute('aria-label', 'Lamiss\'s questions');
+  popover.setAttribute('aria-label', lamissT('common.lamissQuestions'));
   // Keep YouTube's shortcuts (arrows seek, space plays) out of the controls.
   for (const type of ['keydown', 'keyup', 'keypress']) {
     popover.addEventListener(type, (event) => {
@@ -1864,14 +1902,14 @@ function openLamissSettingsPopover(): void {
 
   const title = document.createElement('p');
   title.className = 'lamiss-settings-popover__title';
-  title.textContent = 'Lamiss\'s questions';
+  title.textContent = lamissT('common.lamissQuestions');
 
   // How close together questions may come.
   const gapRow = document.createElement('div');
   gapRow.className = 'lamiss-settings-popover__row';
   const gapLabel = document.createElement('label');
   gapLabel.htmlFor = 'lamiss-gap-input';
-  gapLabel.textContent = 'How close together';
+  gapLabel.textContent = lamissT('popover.howClose');
   const gapValue = document.createElement('output');
   gapValue.className = 'lamiss-settings-popover__value';
   gapValue.htmlFor.add('lamiss-gap-input');
@@ -1889,13 +1927,13 @@ function openLamissSettingsPopover(): void {
   gapScale.className = 'lamiss-settings-popover__scale';
   gapScale.setAttribute('aria-hidden', 'true');
   const fewer = document.createElement('span');
-  fewer.textContent = 'Fewer';
+  fewer.textContent = lamissT('common.fewer');
   const more = document.createElement('span');
-  more.textContent = 'More';
+  more.textContent = lamissT('common.more');
   gapScale.append(fewer, more);
 
   gapInput.addEventListener('input', () => {
-    gapValue.textContent = `At least ${formatQuestionGap(LAMISS_QUESTION_GAPS_SECONDS[Number(gapInput.value)])} apart`;
+    gapValue.textContent = lamissT('common.gapApart', { gap: formatQuestionGap(LAMISS_QUESTION_GAPS_SECONDS[Number(gapInput.value)]) });
   });
   gapInput.addEventListener('change', () => {
     void updateLamissQuestionSettings({ minSecondsBetweenQuestions: LAMISS_QUESTION_GAPS_SECONDS[Number(gapInput.value)] });
@@ -1904,24 +1942,24 @@ function openLamissSettingsPopover(): void {
   // Difficulty as three buttons.
   const difficultyLabel = document.createElement('p');
   difficultyLabel.className = 'lamiss-settings-popover__label';
-  difficultyLabel.textContent = 'Difficulty';
+  difficultyLabel.textContent = lamissT('common.difficulty');
   const difficulty = document.createElement('div');
   difficulty.className = 'lamiss-settings-popover__segments';
   difficulty.setAttribute('role', 'radiogroup');
-  difficulty.setAttribute('aria-label', 'Difficulty');
+  difficulty.setAttribute('aria-label', lamissT('common.difficulty'));
   for (const choice of LAMISS_DIFFICULTY_CHOICES) {
     const option = document.createElement('button');
     option.type = 'button';
     option.dataset.value = choice.value;
     option.setAttribute('role', 'radio');
-    option.textContent = choice.label;
+    option.textContent = lamissT(choice.label);
     option.addEventListener('click', () => void updateLamissQuestionSettings({ difficulty: choice.value }));
     difficulty.append(option);
   }
 
   const hint = document.createElement('p');
   hint.className = 'lamiss-settings-popover__hint';
-  hint.textContent = 'Saved in this browser only. Lamiss only asks about parts you\'ve already watched.';
+  hint.textContent = lamissT('popover.hint');
 
   popover.append(title, gapRow, gapInput, gapScale, difficultyLabel, difficulty, hint);
   document.body.append(popover);
@@ -1991,6 +2029,32 @@ document.addEventListener('pointerdown', (event) => {
 }, true);
 window.addEventListener('scroll', positionLamissSettingsPopover, { passive: true });
 window.addEventListener('resize', positionLamissSettingsPopover);
+
+// The app language (TDR-0003): everything Lamiss shows on the page follows it.
+// The popover is rebuilt in the new language if it was open.
+function renderLamissLanguage(): void {
+  const button = document.getElementById(LAMISS_PAGE_BUTTON_ID) as HTMLButtonElement | null;
+  if (button) {
+    renderLamissButton(button);
+  }
+  const frame = document.getElementById(LAMISS_CHAT_FRAME_ID) as HTMLIFrameElement | null;
+  if (frame) {
+    frame.title = lamissT('page.chatFrame');
+  }
+  const timer = document.getElementById(LAMISS_TIMER_ID);
+  if (timer) {
+    timer.title = lamissT('timer.title');
+  }
+  renderLamissTimer();
+  renderLamissQuestion();
+  if (document.getElementById(LAMISS_SETTINGS_POPOVER_ID)) {
+    closeLamissSettingsPopover();
+    openLamissSettingsPopover();
+  }
+}
+
+onAppLanguageChange(renderLamissLanguage);
+void loadAppLanguage().then(renderLamissLanguage);
 
 // YouTube is a single-page app: the watch metadata is rebuilt on every
 // in-app navigation, so keep re-checking instead of injecting once.
