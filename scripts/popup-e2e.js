@@ -86,6 +86,24 @@ const kokoroVoices = {
 };
 const openaiVoices = { provider: 'openai', selectable: false, defaultSpeed: 1.0, voices: [{ id: 'coral', label: 'Coral', language: null, default: true }] };
 let voices = kokoroVoices;
+// GET /api/me/recent-videos (TDR-0004): one complete video and one with every optional field missing.
+const recentVideosSample = {
+  videos: [
+    {
+      videoId: 42, platform: 'YOUTUBE', externalVideoId: 'LeRylkDym54', title: 'How to learn any language',
+      thumbnailUrl: 'https://i.ytimg.com/vi/LeRylkDym54/mqdefault.jpg', videoUrl: 'https://www.youtube.com/watch?v=LeRylkDym54',
+      durationSeconds: 612, lastStudiedAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
+      playback: { lastPositionMs: 185_400 }, learningProgress: { questionsAnswered: 4 }
+    },
+    {
+      videoId: 7, platform: 'YOUTUBE', externalVideoId: 'abc', title: null,
+      thumbnailUrl: null, videoUrl: 'https://www.youtube.com/watch?v=abc',
+      durationSeconds: null, lastStudiedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      playback: null, learningProgress: { questionsAnswered: 0 }
+    }
+  ]
+};
+let recentVideosReply = { status: 200, body: recentVideosSample };
 const backendCalls = [];
 
 // A short silent WAV stands in for synthesized speech.
@@ -149,6 +167,8 @@ async function answerBackend(route, apiBase) {
     }
     case 'GET /api/me/preferences':
       return json(200, preferences);
+    case 'GET /api/me/recent-videos':
+      return json(recentVideosReply.status, recentVideosReply.body);
     case 'PUT /api/me/preferences':
       preferences = JSON.parse(request.postData());
       return json(200, preferences);
@@ -202,6 +222,10 @@ async function main() {
     await context.route('https://www.youtube.com/**', route => route.request().resourceType() === 'document'
       ? route.fulfill({ status: 200, contentType: 'text/html', body: YOUTUBE_STUB })
       : route.abort());
+    // Video thumbnails: the extension's own icon stands in.
+    await context.route('https://i.ytimg.com/**', route => route.fulfill({
+      status: 200, contentType: 'image/png', body: fs.readFileSync(path.join(root, 'src', 'icons', 'icon-128.png'))
+    }));
 
     let worker = context.serviceWorkers()[0];
     worker ??= await context.waitForEvent('serviceworker', { timeout: 15000 });
@@ -298,6 +322,7 @@ async function main() {
     await popup.waitForSelector('#statusText:not(:has-text("Checking"))');
     check(await popup.locator('#signInCard').isVisible(), 'signed out: the sign-in card shows');
     check(await popup.locator('.category[data-open="tutor"]').isDisabled(), 'signed out: Tutor Behavior needs the account');
+    check(await popup.locator('.category[data-open="recent"]').isDisabled(), 'signed out: Recent videos needs the account');
     check(await popup.locator('#startButton').isDisabled(), 'signed out: Start Learning is disabled');
     await shot('01-home-signed-out');
 
@@ -333,6 +358,54 @@ async function main() {
     await popup.locator('#appLanguagePicker button[data-language="en"]').click();
     await popup.waitForFunction(() => document.documentElement.lang === 'en');
     check(backendCalls.filter(call => call.call === 'PUT /api/me/preferences').length === putsBeforeLanguage, 'app language: not a backend preference');
+
+    // Recent videos (TDR-0004).
+    await popup.locator('.category[data-open="recent"]').click();
+    await popup.waitForSelector('#recentList:not([hidden])');
+    const items = popup.locator('.recent-item');
+    check(await items.count() === 2, 'recent: one item per video from GET /api/me/recent-videos');
+    const first = items.nth(0);
+    check(await first.locator('.recent-title').textContent() === 'How to learn any language', 'recent: the title');
+    check(await first.locator('.recent-thumb img').evaluate(img => img.decode().then(() => img.naturalWidth > 0, () => false)), 'recent: the thumbnail loads');
+    check(await first.locator('.recent-when').textContent() === '2 hours ago', 'recent: when it was last studied');
+    check(await first.locator('.recent-playback span:not(.recent-bar):not(.recent-bar-fill)').textContent() === 'Stopped at 3:05 of 10:12', 'recent: where playback stopped');
+    check(await first.locator('.recent-bar-fill').evaluate(fill => fill.style.width) === '30%', 'recent: the playback bar at 30%');
+    check(await first.locator('.recent-progress').textContent() === '4 questions answered', 'recent: learning progress apart from the playback bar');
+    const second = items.nth(1);
+    check(await second.locator('.recent-title').textContent() === 'YouTube video', 'recent: a missing title falls back');
+    check(await second.locator('.recent-thumb[data-placeholder="true"]').count() === 1, 'recent: a missing thumbnail shows a placeholder');
+    check(await second.locator('.recent-playback').textContent() === 'Not played yet', 'recent: a missing position says so');
+    check(await second.locator('.recent-progress').textContent() === 'No questions answered yet', 'recent: no answers yet');
+    check(await second.locator('.recent-resume').textContent() === 'Watch', 'recent: Watch when there is nothing to resume');
+    await shot('02c-recent-videos');
+    // Resume opens a new tab at the position and leaves the others alone. (A real popup then closes.)
+    await popup.evaluate(() => {
+      window.close = () => {
+        window.lamissE2eClosed = true;
+      };
+    });
+    const [resumed] = await Promise.all([context.waitForEvent('page'), first.locator('.recent-resume').click()]);
+    await resumed.waitForLoadState('domcontentloaded');
+    check(resumed.url() === 'https://www.youtube.com/watch?v=LeRylkDym54&t=185s', `recent: Resume opens the video at 3:05 (${resumed.url()})`);
+    check(youtube.url() === VIDEO_URL, 'recent: the YouTube tab already open is not touched');
+    check(await popup.evaluate(() => window.lamissE2eClosed === true), 'recent: the popup closes after opening the video');
+    await resumed.close();
+    await back('recent');
+    recentVideosReply = { status: 200, body: { videos: [] } };
+    await popup.locator('.category[data-open="recent"]').click();
+    await popup.waitForSelector('#recentEmpty:not([hidden])');
+    check(await popup.locator('#recentList').isHidden(), 'recent: an empty history shows the empty state');
+    await shot('02d-recent-empty');
+    await back('recent');
+    recentVideosReply = { status: 503, body: { detail: 'Lamiss is busy', retryable: true } };
+    await popup.locator('.category[data-open="recent"]').click();
+    await popup.waitForSelector('#recentError:not([hidden])');
+    check(await popup.locator('#recentErrorText').textContent() === 'Lamiss is busy', 'recent: a failed call shows the error and Try again');
+    recentVideosReply = { status: 200, body: recentVideosSample };
+    await popup.locator('#recentRetryButton').click();
+    await popup.waitForSelector('#recentList:not([hidden])');
+    check(await popup.locator('.recent-item').count() === 2, 'recent: Try again loads the list');
+    await back('recent');
 
     // Double Captions.
     await popup.locator('.category[data-open="captions"]').click();
