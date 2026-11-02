@@ -218,8 +218,9 @@ function createExtensionEnv(options = {}) {
       if (file === 'shared/lamiss-config.js') {
         vm.runInContext([
           '"use strict";',
-          `const LAMISS_API_BASE_URL = ${JSON.stringify(API_BASE_URL)};`,
-          `const LAMISS_WS_BASE_URL = ${JSON.stringify(API_BASE_URL.replace('https:', 'wss:'))};`,
+          `const LAMISS_ENVIRONMENT = ${JSON.stringify(options.environment ?? 'development')};`,
+          `const LAMISS_API_BASE_URL = ${JSON.stringify(options.apiBaseUrl ?? API_BASE_URL)};`,
+          `const LAMISS_WS_BASE_URL = ${JSON.stringify(options.wsBaseUrl ?? API_BASE_URL.replace("https:", "wss:"))};`,
           `const LAMISS_GOOGLE_CLIENT_ID = ${JSON.stringify(options.googleClientId ?? GOOGLE_CLIENT_ID)};`
         ].join('\n'), context, { filename: file });
       } else {

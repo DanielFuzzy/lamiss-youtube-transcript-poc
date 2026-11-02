@@ -130,6 +130,10 @@ async function ingestTranscript(payload: TranscriptIngestPayload): Promise<Trans
   if (!accessToken) {
     return { ok: false, status: 401, error: lamissSignInRequiredMessage(), signInRequired: true };
   }
+  const misconfigured = lamissMisconfigured();
+  if (misconfigured) {
+    return { ok: false, error: misconfigured.error };
+  }
   try {
     const response = await fetch(LAMISS_TRANSCRIPT_INGEST_ENDPOINT, withAuthorization({
       method: 'POST',
@@ -1324,6 +1328,10 @@ async function trySilentSignIn(): Promise<void> {
 
 // Best effort: a failed or rejected logout still ends the session locally.
 async function revokeAccessToken(accessToken: string): Promise<void> {
+  // Never send the token to an address the build can't vouch for.
+  if (lamissBackendConfigProblem()) {
+    return;
+  }
   try {
     await fetch(`${LAMISS_API_BASE_URL}/api/auth/logout`, withAuthorization({ method: 'POST' }, accessToken));
   } catch {

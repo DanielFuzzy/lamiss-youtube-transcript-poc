@@ -8,8 +8,41 @@
 // Where the backend is: set at build time from LAMISS_API_URL (see
 // scripts/build.js), which writes them to shared/lamiss-config.js. That file
 // is loaded before this one everywhere.
+declare const LAMISS_ENVIRONMENT: string;
 declare const LAMISS_API_BASE_URL: string;
 declare const LAMISS_WS_BASE_URL: string;
+
+// Why the packaged backend address can't be used, or undefined when it can.
+// scripts/build.js already refuses such a build; this keeps a hand-edited or
+// broken lamiss-config.js from sending anything (the token included) to an
+// insecure or malformed address. Outside development: https and wss only.
+function lamissBackendConfigProblem(): string | undefined {
+  let api: URL;
+  let ws: URL;
+  try {
+    api = new URL(LAMISS_API_BASE_URL);
+    ws = new URL(LAMISS_WS_BASE_URL);
+  } catch {
+    return 'the server address is not a valid URL';
+  }
+  if (!['http:', 'https:'].includes(api.protocol) || !['ws:', 'wss:'].includes(ws.protocol) || api.host !== ws.host) {
+    return 'the REST and WebSocket addresses do not match';
+  }
+  if (LAMISS_ENVIRONMENT !== 'development' && (api.protocol !== 'https:' || ws.protocol !== 'wss:')) {
+    return 'the server address is not secure (https/wss)';
+  }
+  return undefined;
+}
+
+// The failure every backend call returns when the address can't be used.
+function lamissMisconfigured(): { ok: false; error: string; retryable: false; errorCode: string } | undefined {
+  const problem = lamissBackendConfigProblem();
+  if (!problem) {
+    return undefined;
+  }
+  console.error(`Lamiss POC: not calling the backend: ${problem} (${LAMISS_ENVIRONMENT} build).`);
+  return { ok: false, error: lamissT('common.misconfigured'), retryable: false, errorCode: 'misconfigured' };
+}
 
 // --- Signing in ------------------------------------------------------------
 // The background worker owns Google sign-in (see shared/lamiss-auth.js and
@@ -241,6 +274,10 @@ type LamissQuestion = {
 } & ({ text: string } | { audio: Blob });
 
 async function callLamiss<T>(path: string, init: RequestInit, options: LamissCallOptions = {}): Promise<LamissCallResult<T>> {
+  const misconfigured = lamissMisconfigured();
+  if (misconfigured) {
+    return misconfigured;
+  }
   try {
     const accessToken = await resolveAccessToken(options);
     const response = await fetch(`${LAMISS_API_BASE_URL}${path}`, withAuthorization(init, accessToken));
@@ -351,6 +388,10 @@ function transcribeSpeech(audio: Blob, accessToken?: string): Promise<LamissCall
 // Lamiss's own voice (a kind teacher), as MP3 audio. language (ISO 639-1)
 // picks the voice when the backend uses Kokoro, whose voices speak one language each.
 async function synthesizeSpeech(text: string, language?: string, accessToken?: string): Promise<LamissCallResult<Blob>> {
+  const misconfigured = lamissMisconfigured();
+  if (misconfigured) {
+    return misconfigured;
+  }
   try {
     const token = await resolveAccessToken({ accessToken });
     const response = await fetch(`${LAMISS_API_BASE_URL}/api/speech/synthesis`, withAuthorization({
