@@ -32,17 +32,19 @@ sites (the content script only runs on `www.youtube.com`), payment data, locatio
   setup).
 - **Backend hosting provider**: wherever the LAMISS backend and its MySQL database run (not decided yet).
 
-## Gaps before a public listing (must be resolved, not worked around)
+## Privacy requirements: status
 
-1. **There is no privacy policy page.** The Chrome Web Store requires a privacy policy URL for an extension that
-   handles personal or sensitive user data (this one handles authentication info, personal communications
-   and audio). A draft is in `store/privacy-policy-draft.md`; it needs an owner, legal review and a public URL.
-2. **No way to delete an account or its data.** The backend has no delete endpoint. Users can only stop using it.
-   Either add deletion (or a documented request process) or the policy must say how deletion requests are
-   handled. Many jurisdictions (e.g. GDPR) require it.
-3. **No retention limits.** Everything above is kept indefinitely, OpenAI files and vector stores included. Decide
-   on retention, or disclose that there is none.
-4. **No in-product notice before audio and conversations are sent to OpenAI.** The Chrome Web Store's User Data
-   policy asks for prominent disclosure when data is used in a way users might not expect. A one-time notice
-   at sign-in (what is sent, to whom) linking to the policy is recommended.
-5. **Backend location and operator identity** (the "who we are" of the policy) are not decided yet.
+1. **Privacy policy:** `site/privacy-policy.html`, published by the Pages workflow at
+   https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/privacy-policy.html (live once it is on `main`).
+   It is not legal advice; have it reviewed if LAMISS grows beyond a personal project.
+2. **Deletion:** **Profile & Account → Delete my account** calls `DELETE /api/me`. It permanently deletes the
+   account, settings, sessions, conversations, answers and progress (backend TDR-0005). Requests can also go by
+   e-mail.
+3. **Retention:** until the user deletes the account. OpenAI responses are requested with `store=false`. Whisper
+   and OpenAI's abuse-monitoring retention (up to 30 days) follow OpenAI's policy, which the privacy policy links.
+4. **In-product notice:** sign-in in the popup and the chat shows what is sent where, with the policy link, on an
+   "Agree and sign in with Google" button. The worker refuses any sign-in, including silent re-sign-in, until
+   that notice is accepted on an extension page; the YouTube page can't accept it. Bumping
+   `LAMISS_PRIVACY_NOTICE_VERSION` asks everyone again.
+5. **Still open:** the **backend hosting provider** is not chosen. The policy says it will be named before the
+   public release. Update the policy then.

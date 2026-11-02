@@ -28,8 +28,9 @@ decision or an account; nothing here has been submitted yet.
   add a real screenshot of the question card on a YouTube video before going public: the generated ones only show the popup.
 - **Small promo tile (440×280):** `store/assets/promo-small-440x280.jpg`.
 - **Marquee (1400×560):** optional, not made.
-- **Official URL / homepage:** **TODO** (e.g. the project site).
-- **Support URL:** **TODO**. A support page or e-mail address the store can show.
+- **Official URL / homepage:** https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/
+- **Support URL:** https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/ (`site/index.html`: help and
+  contact).
 
 ## Privacy tab
 
@@ -58,7 +59,8 @@ decision or an account; nothing here has been submitted yet.
 - **Certifications** (tick only if true when submitting; they currently are, but re-check):
   data is not sold to third parties; not used or transferred for purposes unrelated to the single purpose; not
   used or transferred to determine creditworthiness or for lending.
-- **Privacy policy URL:** **TODO (blocker).** See `store/privacy-policy-draft.md`.
+- **Privacy policy URL:** https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/privacy-policy.html
+  (`site/privacy-policy.html`, published by `.github/workflows/pages.yml` once it is on `main`).
 
 ## Distribution tab
 

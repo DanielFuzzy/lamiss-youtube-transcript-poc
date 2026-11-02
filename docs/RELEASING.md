@@ -17,6 +17,7 @@ The addresses live in **`config/environments.json`**:
 | `development` | `npm run build`, `npm test`, loading `compiled/` unpacked | anything `http(s)://host[:port]` (default `http://localhost:8080`) | `LAMISS_API_URL` and `LAMISS_GOOGLE_CLIENT_ID` from the shell or a git-ignored `.env` |
 | `staging` | testers loading a ZIP unpacked, against a staging server | `https://` on a public host | none |
 | `production` | the Chrome Web Store package | `https://` on a public host | none |
+| `store-draft` | only to create the store item before a public backend exists (§5); never submitted | `http://localhost:8080` | none |
 
 `googleClientId` is the public client ID of the Google OAuth client (not a secret). It is required for staging
 and production. `.env` is never read for staging or production builds, and the build refuses
@@ -100,13 +101,23 @@ npm run package:production     # or package:staging
    will own LAMISS. A team or group account is better than a personal one. Pay the one-time registration fee and
    complete the account verification Google asks for (identity, contact e-mail, and for a trader account the
    trader details).
-2. **First upload by hand:** **New item**, then upload `dist/lamiss-<version>-production.zip`. This creates
-   the item and its **extension ID**. Do section 1, steps 2 and 3, for that ID, then rebuild if anything
-   changed.
+2. **First upload by hand, to create the item.** This is only to get the store's **extension ID**: the item stays
+   a draft and is **not** submitted.
+   - Before a public backend exists, build `npm run package:store-draft`. It is a store package (no `"key"`)
+     pointed at `http://localhost:8080`, and is never built by CI. Once production has an `apiUrl`, use
+     `npm run package:production` instead.
+   - In the dashboard, click **+ New item**, choose the ZIP from `dist/`, and confirm. The item is created as
+     a **Draft**, and its 32-letter ID appears in the item's page address and under **Package**.
+   - **Do not click "Submit for review"** with a store-draft package.
+   - Then do section 1, steps 2 and 3, for that ID: add it to the backend's CORS origins and to the OAuth
+     redirect URIs.
+   - Optional: to give your development builds the **same ID as the store item**, copy the public key from
+     **Package → View public key** into `manifest.json` `"key"` (one line, no header or footer lines). The
+     extension ID then matches in development and in the store, so CORS and OAuth need only one entry. This
+     changes your current development ID, so update CORS and OAuth for it at the same moment.
 3. **Store listing, Privacy and Distribution tabs:** fill them from `store/listing.md`, with the images in
-   `store/assets/` (re-made with `scripts/store-assets.js`). The **privacy policy URL is required** and does
-   not exist yet. See `store/privacy-data-flow.md` (what the extension collects) and
-   `store/privacy-policy-draft.md`.
+   `store/assets/` (re-made with `scripts/store-assets.js`). The privacy policy and support URLs are the
+   GitHub Pages ones in `store/listing.md` (`site/`); `store/privacy-data-flow.md` backs the data-usage answers.
 4. **API credentials for the release workflow** (optional; uploading by hand works too):
    1. In a Google Cloud project, enable the **Chrome Web Store API**.
    2. Create an OAuth client and get a refresh token for the scope
