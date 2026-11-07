@@ -82,7 +82,7 @@ function validatePackage(dir, { environment, expectedVersion } = {}) {
     return [`manifest.json is not valid JSON: ${error.message}`];
   }
   const store = environment === 'production' || environment === 'store-draft';
-  const secure = environment === 'staging' || environment === 'production';
+  const secure = environment === 'pre' || environment === 'staging' || environment === 'production';
 
   // Manifest V3 basics.
   if (manifest.manifest_version !== 3) {

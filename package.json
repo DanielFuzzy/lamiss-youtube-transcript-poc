@@ -5,8 +5,11 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build.js",
+    "build:local": "tsc -p tsconfig.json && node scripts/build.js --env development",
+    "build:pre": "tsc -p tsconfig.json && node scripts/build.js --env pre",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test \"test/**/*.test.js\"",
+    "package:pre": "node scripts/package.js --env pre",
     "package:staging": "node scripts/package.js --env staging",
     "package:production": "node scripts/package.js --env production",
     "phase3:verify": "npm run build && node scripts/phase3-verify.js",
