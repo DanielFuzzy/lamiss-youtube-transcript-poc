@@ -1,7 +1,7 @@
 // Copies the extension's static files next to the compiled TypeScript and
 // writes the backend location into it.
 //
-//   node scripts/build.js [outDir] [--env development|staging|production]
+//   node scripts/build.js [outDir] [--env development|pre|staging|production]
 //
 // outDir defaults to compiled/; the environment to LAMISS_ENV, else
 // development. Each environment's backend and Google client ID come from
@@ -11,8 +11,8 @@
 //
 // Development only: LAMISS_API_URL and LAMISS_GOOGLE_CLIENT_ID (from the shell
 // or a git-ignored .env) override the file, for a local or test backend.
-// Staging and production never read .env, refuse those variables, and need
-// https on a public host. Production is the Chrome Web Store package: its
+// Pre, staging and production never read .env, refuse those variables, and
+// need https on a public host. Production is the Chrome Web Store package: its
 // manifest loses "key" (the store assigns the extension ID).
 const fs = require('fs');
 const path = require('path');

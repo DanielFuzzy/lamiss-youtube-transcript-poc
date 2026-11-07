@@ -57,6 +57,16 @@ test('build config: staging and production come only from the file, over https o
   assert.throws(() => resolveBuildConfig(environments(), 'qa', {}), /unknown environment/);
 });
 
+test('build config: pre is the Railway backend, from the file only, keeping the development extension ID', () => {
+  const pre = resolveBuildConfig(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'environments.json'), 'utf8')), 'pre', {});
+  assert.equal(pre.apiOrigin, 'https://lamiss-production.up.railway.app');
+  assert.equal(pre.wsOrigin, 'wss://lamiss-production.up.railway.app');
+  assert.match(pre.googleClientId, /\.apps\.googleusercontent\.com$/);
+  assert.equal(pre.chromeWebStore, false);
+  assert.throws(() => resolveBuildConfig(environments({ pre: { apiUrl: 'https://pre.lamiss.app', googleClientId: CLIENT_ID } }), 'pre', { LAMISS_API_URL: 'http://localhost:8080' }), /can only override development/);
+  assert.throws(() => resolveBuildConfig(environments({ pre: { apiUrl: 'http://pre.lamiss.app', googleClientId: CLIENT_ID } }), 'pre', {}), /https/);
+});
+
 test('build config: local and private hosts are recognized', () => {
   for (const host of ['localhost', 'app.localhost', '127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.0.10', '169.254.1.1', '100.64.0.1', '[::1]', 'printer.local']) {
     assert.equal(isLocalOrPrivateHost(host), true, host);
