@@ -133,7 +133,10 @@ has a home view and one view per settings category, each with a back arrow:
   around the playback position (60 s windows, the next one 30 s of watching
   ahead, a new one after a seek), and again every 2.5 s while lines are still
   being translated (`PENDING`, at most 24 times); until then the source line
-  shows with "…". A failed line shows the source only. No colors yet (Lamiss#79, task 3).
+  shows with "…". A failed line shows the source only. Words that mean the same
+  thing share one of six colors, from the line's `groups` (Lamiss#79, task 3);
+  a line without groups colors only the words written the same in both (names,
+  numbers).
 - **Audio & Voice**: microphone and speaker (with a level-meter microphone test
   and a test tone), tutor voice (`GET /api/speech/voices`, filtered to the
   learning language), **Preview voice**, speaking speed, and volume.
@@ -151,7 +154,7 @@ has a home view and one view per settings category, each with a back arrow:
   `Intl.DateTimeFormat().resolvedOptions().timeZone` as `?timeZone=`.
 
 Only the tutor's tone for the pre-generated questions (which all users of a
-video share) and Double Captions' word colors are still to come.
+video share) is still to come.
 
 **Auto-pause.** On (the default), the backend sends `PAUSE_VIDEO` before each
 question and `RESUME_VIDEO` after the feedback, and the video stays paused
