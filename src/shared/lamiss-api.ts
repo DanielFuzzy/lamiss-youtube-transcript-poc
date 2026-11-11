@@ -213,6 +213,62 @@ async function saveDeviceSettings(change: Partial<LamissDeviceSettings>): Promis
   return next;
 }
 
+// --- Double Captions (the backend's docs/TDR-0006-Double-Captions.md) -------------
+
+// On or off for this browser profile; off until the user turns it on. The
+// translation's language is the user's native language, on the backend.
+type LamissCaptionSettings = { enabled: boolean };
+
+const LAMISS_CAPTION_SETTINGS_KEY = 'lamissCaptionSettings';
+
+async function readCaptionSettings(): Promise<LamissCaptionSettings> {
+  try {
+    const stored = await chrome.storage.local.get(LAMISS_CAPTION_SETTINGS_KEY);
+    return { enabled: (stored[LAMISS_CAPTION_SETTINGS_KEY] as Partial<LamissCaptionSettings> | undefined)?.enabled === true };
+  } catch {
+    return { enabled: false };
+  }
+}
+
+function saveCaptionSettings(settings: LamissCaptionSettings): Promise<void> {
+  return chrome.storage.local.set({ [LAMISS_CAPTION_SETTINGS_KEY]: settings });
+}
+
+// One source word: index is its position in the transcript.
+type LamissCaptionToken = { index: number; text: string; startMs: number; endMs: number };
+
+// READY: target holds the translation. PENDING: being translated, ask again
+// shortly. UNAVAILABLE: it failed; show the source line only.
+type LamissCaptionStatus = 'READY' | 'PENDING' | 'UNAVAILABLE';
+
+// One double-caption line: a chunk of the source and its translation's words.
+type LamissCaptionChunk = {
+  chunkIndex: number;
+  startMs: number;
+  endMs: number;
+  source: LamissCaptionToken[];
+  target: string[];
+  status: LamissCaptionStatus;
+};
+
+// GET /api/captions/{videoId}: the chunks overlapping [fromMs, toMs).
+type LamissCaptionWindow = {
+  videoId: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  fromMs: number;
+  toMs: number;
+  chunks: LamissCaptionChunk[];
+};
+
+// Content script → worker, which calls the backend (the page has no CORS access).
+const LAMISS_FETCH_CAPTIONS_MESSAGE = 'FETCH_DOUBLE_CAPTIONS';
+
+function fetchDoubleCaptions(videoId: string, fromMs: number): Promise<LamissCallResult<LamissCaptionWindow>> {
+  const from = Math.max(0, Math.floor(fromMs));
+  return callLamiss<LamissCaptionWindow>(`/api/captions/${encodeURIComponent(videoId)}?fromMs=${from}`, { headers: { accept: 'application/json' } });
+}
+
 // --- Popup ↔ content script (TDR-0002) -------------------------------------------
 
 // Popup → the active YouTube tab: same as clicking the in-page Lamiss button.

@@ -120,7 +120,7 @@ function questionEnv() {
     clearInterval: () => undefined
   };
   const env = createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'content/youtube.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'content/double-captions.js', 'content/youtube.js'],
     withoutSessionStorage: true,
     globals: {
       window,

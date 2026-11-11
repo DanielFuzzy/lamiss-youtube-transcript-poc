@@ -127,7 +127,7 @@
     </div>
   </section>
 
-  <!-- Double Captions: not built yet (TDR-0002); says so instead of pretending. -->
+  <!-- Double Captions (the backend's docs/TDR-0006-Double-Captions.md): on or off, in the native language. -->
   <section id="captionsView" class="view" data-view="captions" hidden>
     <header class="view-header">
       <button class="back-button" type="button" data-back aria-label="Back to home" data-i18n-attr="aria-label:common.backHome">
@@ -139,7 +139,7 @@
       <section class="intro">
         <span class="tile tile-purple" aria-hidden="true"><span class="tile-cc">CC</span></span>
         <div>
-          <p class="intro-title"><span data-i18n="home.captionsTitle">Double Captions</span> <span class="badge" data-i18n="captions.comingSoon">Coming soon</span></p>
+          <p class="intro-title" data-i18n="home.captionsTitle">Double Captions</p>
           <p class="intro-detail" data-i18n="captions.intro">Original and translated subtitles, together while you watch.</p>
         </div>
       </section>
@@ -149,11 +149,19 @@
         <p class="caption-translated">He estado aprendiendo inglés durante dos años.</p>
       </div>
 
-      <section class="card note-card">
-        <p class="note-title" data-i18n="captions.whatsComing">What's coming</p>
-        <p data-i18n="captions.coming1">Lamiss will show the video's own subtitle line with its translation right below it, stacked on the YouTube player, in the language you choose.</p>
-        <p data-i18n="captions.coming2">This isn't available yet, so there's nothing to switch on here today. Lamiss already reads the video's captions to ask you questions about it.</p>
-      </section>
+      <div class="toggle-row">
+        <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 11h4M13 11h4M7 15h10" /></svg>
+        <div class="toggle-text">
+          <label class="setting-label" for="doubleCaptionsInput" data-i18n="captions.show">Show double captions</label>
+          <p id="doubleCaptionsHint" class="field-hint"></p>
+        </div>
+        <label class="switch">
+          <input id="doubleCaptionsInput" type="checkbox" aria-describedby="doubleCaptionsHint" />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
+
+      <p class="footnote" data-i18n="captions.footnote">They show on the video while Lamiss runs on it, in place of YouTube's captions. Each line is translated once and shared by everyone watching in that language.</p>
     </div>
   </section>
 
@@ -494,6 +502,7 @@
   <script src="audio-view.js"></script>
   <script src="tutor-view.js"></script>
   <script src="recent-view.js"></script>
+  <script src="captions-view.js"></script>
   <script src="profile-view.js"></script>
   <script src="popup.js"></script>
 </body>
