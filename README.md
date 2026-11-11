@@ -123,7 +123,17 @@ has a home view and one view per settings category, each with a back arrow:
   the video was finished. **Resume** opens the video at that position in a new
   tab (only `https://www.youtube.com/watch` addresses). It has loading, empty and
   error (**Try again**) states, and needs the account.
-- **Double Captions**: "Coming soon"; there is nothing to switch on yet.
+- **Double Captions** (the backend's
+  [docs/TDR-0006-Double-Captions.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0006-Double-Captions.md)):
+  an on/off switch (`lamissCaptionSettings` in extension storage, off by
+  default) and the translation's language, the native language from Profile &
+  Account. While a Lamiss session runs on the video, `content/double-captions.ts`
+  shows the video's caption line with its translation below, in place of
+  YouTube's own captions. It asks the worker for `GET /api/captions/{videoId}?fromMs=`
+  around the playback position (60 s windows, the next one 30 s of watching
+  ahead, a new one after a seek), and again every 2.5 s while lines are still
+  being translated (`PENDING`, at most 24 times); until then the source line
+  shows with "…". A failed line shows the source only. No colors yet (Lamiss#79, task 3).
 - **Audio & Voice**: microphone and speaker (with a level-meter microphone test
   and a test tone), tutor voice (`GET /api/speech/voices`, filtered to the
   learning language), **Preview voice**, speaking speed, and volume.
@@ -140,8 +150,8 @@ has a home view and one view per settings category, each with a back arrow:
   progress, and **Log Out**. "Today" is the browser's local day: the popup sends
   `Intl.DateTimeFormat().resolvedOptions().timeZone` as `?timeZone=`.
 
-Only Double Captions (and the tutor's tone for the pre-generated questions,
-which all users of a video share) are still to come.
+Only the tutor's tone for the pre-generated questions (which all users of a
+video share) and Double Captions' word colors are still to come.
 
 **Auto-pause.** On (the default), the backend sends `PAUSE_VIDEO` before each
 question and `RESUME_VIDEO` after the feedback, and the video stays paused

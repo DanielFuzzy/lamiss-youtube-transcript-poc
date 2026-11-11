@@ -17,6 +17,7 @@ const LAMISS_CONTENT_SCRIPT_MESSAGES = new Set<string>([
   'INGEST_TRANSCRIPT',
   'DISCOVER_CAPTION_TRACKS',
   'FETCH_CAPTION_RESOURCE_MAIN_WORLD',
+  LAMISS_FETCH_CAPTIONS_MESSAGE,
   LAMISS_SIGN_IN_MESSAGE,
   LAMISS_AUTH_STATE_MESSAGE
 ]);
@@ -169,6 +170,17 @@ addLamissMessageListener((message: unknown, sender, sendResponse) => {
 
   if (type === 'INGEST_TRANSCRIPT') {
     void ingestTranscript((message as { payload: TranscriptIngestPayload }).payload).then(sendResponse);
+    return true;
+  }
+
+  // Double Captions around a playback position, for the content script.
+  if (type === LAMISS_FETCH_CAPTIONS_MESSAGE) {
+    const { videoId, fromMs } = message as { videoId?: unknown; fromMs?: unknown };
+    if (typeof videoId !== 'string' || !/^[\w-]{1,64}$/.test(videoId) || typeof fromMs !== 'number' || !Number.isFinite(fromMs)) {
+      sendResponse({ ok: false, error: 'Invalid double captions request', retryable: false });
+      return false;
+    }
+    void fetchDoubleCaptions(videoId, fromMs).then(sendResponse);
     return true;
   }
 

@@ -905,6 +905,7 @@ function startLamissLive(videoId: string, language: string | undefined): void {
   lamissLiveVideoId = videoId;
   connectLamissLive();
   startLamissTimer();
+  startLamissCaptions(videoId);
   scheduleEnsureLamissButton();
   lamissLiveKeepalive = window.setInterval(() => postLamissLive({ type: 'keepalive' }), LAMISS_KEEPALIVE_INTERVAL_MS);
 }
@@ -915,6 +916,7 @@ function stopLamissLive(): void {
   }
   hideLamissQuestion();
   stopLamissTimer();
+  stopLamissCaptions();
   lamissPauseRequested = false;
   lamissLiveVideoId = undefined;
   lamissMonitoringStarted = false;
