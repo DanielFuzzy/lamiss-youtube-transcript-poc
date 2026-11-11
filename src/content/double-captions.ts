@@ -1,7 +1,8 @@
 // Double Captions on the YouTube player (the backend's docs/TDR-0006-Double-Captions.md,
-// Lamiss#79 task 2): the video's own caption line with its translation into
-// the user's native language right below it, while a Lamiss session runs on
-// the video and the setting is on (lamissCaptionSettings).
+// Lamiss#79 tasks 2 and 3): the video's own caption line with its translation
+// into the user's native language right below it, words that mean the same
+// thing in the same color, while a Lamiss session runs on the video and the
+// setting is on (lamissCaptionSettings).
 //
 // The backend lists the chunks around a position (a window of 60 s): source
 // words at once, translations as they get stored. This asks for the window
@@ -55,6 +56,51 @@ function lamissCaptionAt(chunks: LamissCaptionChunk[], positionMs: number): Lami
     }
   }
   return current && positionMs < current.endMs + LAMISS_CAPTION_HOLD_MS ? current : undefined;
+}
+
+// The color of each source and target word of a READY line (undefined: none):
+// the backend's groups, or, for a line it couldn't align, the words written
+// the same in both (names, numbers), which are always a match.
+function lamissCaptionColors(chunk: LamissCaptionChunk): { source: (number | undefined)[]; target: (number | undefined)[] } {
+  const source: (number | undefined)[] = chunk.source.map(() => undefined);
+  const target: (number | undefined)[] = chunk.target.map(() => undefined);
+  if (chunk.status !== 'READY') {
+    return { source, target };
+  }
+  if (chunk.groups && chunk.groups.length > 0) {
+    const position = new Map(chunk.source.map((token, i) => [token.index, i]));
+    for (const group of chunk.groups) {
+      for (const index of group.sourceIndexes) {
+        const i = position.get(index);
+        if (i !== undefined) {
+          source[i] = group.colorIndex % LAMISS_CAPTION_COLORS;
+        }
+      }
+      for (const i of group.targetIndexes) {
+        if (i >= 0 && i < target.length) {
+          target[i] = group.colorIndex % LAMISS_CAPTION_COLORS;
+        }
+      }
+    }
+    return { source, target };
+  }
+  const sourceWords = chunk.source.map(token => lamissCaptionWord(token.text));
+  const targetWords = chunk.target.map(lamissCaptionWord);
+  const once = (words: string[], word: string) => words.indexOf(word) === words.lastIndexOf(word);
+  let color = 0;
+  sourceWords.forEach((word, i) => {
+    const j = targetWords.indexOf(word);
+    if ((word.length >= 2 || /\d/.test(word)) && j >= 0 && once(sourceWords, word) && once(targetWords, word)) {
+      source[i] = target[j] = color % LAMISS_CAPTION_COLORS;
+      color += 1;
+    }
+  });
+  return { source, target };
+}
+
+// A word without case, accents or punctuation, to compare across languages.
+function lamissCaptionWord(text: string): string {
+  return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 // Whether to ask for the window at positionMs: none yet, the position left it
@@ -187,13 +233,26 @@ function renderLamissCaptions(chunk: LamissCaptionChunk | undefined): void {
   if (!chunk) {
     return;
   }
-  source.textContent = chunk.source.map(token => token.text).join(' ');
+  const colors = lamissCaptionColors(chunk);
+  fillLamissCaptionLine(source, chunk.source.map(token => token.text), colors.source);
   source.lang = captions.sourceLanguage ?? '';
   target.lang = captions.targetLanguage ?? '';
   target.hidden = chunk.status === 'UNAVAILABLE';
   target.classList.toggle('lamiss-double-captions__target--pending', chunk.status === 'PENDING');
   // Pending: a placeholder, so the line doesn't jump when the translation arrives.
-  target.textContent = chunk.status === 'READY' ? chunk.target.join(' ') : '…';
+  fillLamissCaptionLine(target, chunk.status === 'READY' ? chunk.target : ['…'], colors.target);
+}
+
+// One <span> per word, colored by its group (lamiss-c0 … lamiss-c5).
+function fillLamissCaptionLine(line: HTMLElement, words: string[], colors: (number | undefined)[]): void {
+  line.replaceChildren(...words.map((word, i) => {
+    const span = document.createElement('span');
+    span.textContent = i < words.length - 1 ? `${word} ` : word;
+    if (colors[i] !== undefined) {
+      span.className = `lamiss-c${colors[i]}`;
+    }
+    return span;
+  }));
 }
 
 function createLamissCaptionsOverlay(): HTMLDivElement {

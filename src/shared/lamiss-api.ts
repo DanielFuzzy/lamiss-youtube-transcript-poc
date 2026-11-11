@@ -241,13 +241,23 @@ type LamissCaptionToken = { index: number; text: string; startMs: number; endMs:
 // shortly. UNAVAILABLE: it failed; show the source line only.
 type LamissCaptionStatus = 'READY' | 'PENDING' | 'UNAVAILABLE';
 
+// Words of a line that mean the same thing, shown in one color (Lamiss#79
+// task 3): sourceIndexes are LamissCaptionToken.index values, targetIndexes
+// positions in target; colorIndex 0–5 (LAMISS_CAPTION_COLORS).
+type LamissCaptionGroup = { sourceIndexes: number[]; targetIndexes: number[]; colorIndex: number };
+
+const LAMISS_CAPTION_COLORS = 6;
+
 // One double-caption line: a chunk of the source and its translation's words.
+// groups: empty when not READY or when the backend couldn't align it; absent
+// from a backend before the colors.
 type LamissCaptionChunk = {
   chunkIndex: number;
   startMs: number;
   endMs: number;
   source: LamissCaptionToken[];
   target: string[];
+  groups?: LamissCaptionGroup[];
   status: LamissCaptionStatus;
 };
 
