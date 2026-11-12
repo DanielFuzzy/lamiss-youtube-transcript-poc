@@ -555,3 +555,57 @@
   line-height: 1.4;
   color: #b4a3d6;
 }
+
+/* Ask Lamiss (Lamiss#84): a mic next to the question timer, and the card's
+   cancel button, shown only for the learner's own question. */
+.lamiss-ask-button {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  margin-left: 8px;
+  padding: 0;
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  border-radius: 50%;
+  color: #ffffff;
+  cursor: pointer;
+  background: #3b1a6e;
+  transition: background 0.15s ease;
+}
+
+.lamiss-ask-button:hover {
+  background: #4c2391;
+}
+
+.lamiss-ask-button:focus-visible,
+.lamiss-question__cancel:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+
+.lamiss-ask-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.lamiss-question__cancel {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  font: 500 14px "Roboto", "Arial", sans-serif;
+  color: #c4b5fd;
+  cursor: pointer;
+  background: transparent;
+}
+
+.lamiss-question__cancel:hover {
+  background: #2a1847;
+}
+
+.lamiss-question__cancel[hidden] {
+  display: none;
+}

@@ -164,6 +164,7 @@ function createExtensionEnv(options = {}) {
       create: async () => ({})
     },
     webRequest: { onBeforeRequest: createEvent() },
+    commands: { onCommand: createEvent() },
     scripting: { executeScript: async () => [] },
     offscreen: {
       createDocument: async () => undefined,

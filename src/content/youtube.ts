@@ -552,6 +552,7 @@ function ensureLamissButton(): void {
   }
   renderLamissButton(button);
   ensureLamissTimer(button);
+  ensureLamissAskButton(button);
 }
 
 // The chat is an extension page in an iframe at the top of the right-hand
@@ -707,6 +708,15 @@ chrome.runtime.onMessage.addListener((message: { type?: string; state?: { status
   return false;
 });
 
+// The Ask Lamiss shortcut, forwarded by the worker (Lamiss#84).
+chrome.runtime.onMessage.addListener((message: { type?: string } | undefined, sender) => {
+  if (message?.type !== LAMISS_OPEN_ASK_MESSAGE || !isFromExtensionPage(sender)) {
+    return false;
+  }
+  openLamissAsk();
+  return false;
+});
+
 // The toolbar popup's Start Learning button and status line. Only pages of
 // this extension may send these: never another extension, nor a content script.
 chrome.runtime.onMessage.addListener((message: { type?: string } | undefined, sender, sendResponse) => {
@@ -841,6 +851,12 @@ type LamissQuestionPhase =
   | 'feedback';     // showing (and reading aloud) the feedback
 
 type LamissQuestionState = {
+  // answer: one of Lamiss's questions. ask: the learner's own question to
+  // Lamiss (the Ask Lamiss card, Lamiss#84); question is then the prompt, and
+  // feedback holds Lamiss's answer.
+  mode: 'answer' | 'ask';
+  // The ask's interactionId, kept for a retry of the same question.
+  askRequestId?: string;
   eventId: string;
   question: string;
   // The language the question is written in (the tutor language, TDR-0003),
@@ -1006,6 +1022,11 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
 
   if (message.type === 'speech-event') {
     onLamissSpeechEvent(message.requestId, message.event);
+    return;
+  }
+
+  if (message.type === 'ask-result') {
+    onLamissAskResult(message);
     return;
   }
 
@@ -1290,7 +1311,9 @@ function onLamissListenEvent(requestId: string, event: LamissListenEvent): void 
     case 'no-speech':
       question.listenRequestId = undefined;
       question.phase = 'answering';
-      question.error = 'I didn\'t hear an answer. Tap the mic to try again, or type it.';
+      question.error = question.mode === 'ask'
+        ? lamissT('ask.noSpeech')
+        : 'I didn\'t hear an answer. Tap the mic to try again, or type it.';
       window.clearInterval(lamissCountdownTimer);
       break;
     case 'transcribing':
@@ -1303,7 +1326,11 @@ function onLamissListenEvent(requestId: string, event: LamissListenEvent): void 
       if (parts) {
         parts.input.value = event.text;
       }
-      submitLamissAnswer(event.text, event.language);
+      if (question.mode === 'ask') {
+        submitLamissAsk(event.text);
+      } else {
+        submitLamissAnswer(event.text, event.language);
+      }
       return;
     }
     case 'failed':
@@ -1334,6 +1361,13 @@ function createLamissQuestion(): HTMLDivElement {
   for (const type of ['keydown', 'keyup', 'keypress']) {
     overlay.addEventListener(type, event => event.stopPropagation());
   }
+  // Escape cancels the learner's own question; Lamiss's questions wait for an answer.
+  overlay.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && lamissQuestion?.mode === 'ask') {
+      event.preventDefault();
+      hideLamissQuestion();
+    }
+  });
   // Clicks would otherwise toggle playback on the player underneath.
   overlay.addEventListener('click', event => event.stopPropagation());
 
@@ -1347,7 +1381,13 @@ function createLamissQuestion(): HTMLDivElement {
   logo.append(createLamissLogoImage());
   const heading = document.createElement('span');
   heading.className = 'lamiss-question__heading';
-  header.append(logo, heading);
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'lamiss-question__cancel';
+  cancel.textContent = '✕';
+  cancel.hidden = true;
+  cancel.addEventListener('click', hideLamissQuestion);
+  header.append(logo, heading, cancel);
 
   const text = document.createElement('p');
   text.id = 'lamiss-question-text';
@@ -1414,6 +1454,7 @@ function lamissQuestionParts(): {
   status: HTMLParagraphElement;
   mic: HTMLButtonElement;
   submit: HTMLButtonElement;
+  cancel: HTMLButtonElement;
 } | null {
   const overlay = document.getElementById(LAMISS_QUESTION_ID) as HTMLDivElement | null;
   if (!overlay) {
@@ -1427,7 +1468,8 @@ function lamissQuestionParts(): {
     feedback: overlay.querySelector('.lamiss-question__feedback') as HTMLDivElement,
     status: overlay.querySelector('.lamiss-question__status') as HTMLParagraphElement,
     mic: overlay.querySelector('.lamiss-question__mic') as HTMLButtonElement,
-    submit: overlay.querySelector('.lamiss-question__submit') as HTMLButtonElement
+    submit: overlay.querySelector('.lamiss-question__submit') as HTMLButtonElement,
+    cancel: overlay.querySelector('.lamiss-question__cancel') as HTMLButtonElement
   };
 }
 
@@ -1451,7 +1493,7 @@ function showLamissQuestion(eventId: string, question: string, language?: string
 
   const video = getLamissVideo();
   const state: LamissQuestionState = {
-    eventId, question, phase: 'speaking', queued: false, holdPaused,
+    mode: 'answer', eventId, question, phase: 'speaking', queued: false, holdPaused,
     language: lamissSpeechLanguage(language, undefined),
     askedAtSeconds: video?.currentTime
   };
@@ -1506,7 +1548,7 @@ function lamissStatusText(question: LamissQuestionState): string {
     case 'transcribing':
       return lamissT('question.transcribing');
     case 'sending':
-      return lamissT('question.checking');
+      return lamissT(question.mode === 'ask' ? 'ask.thinking' : 'question.checking');
     default:
       return question.error ?? '';
   }
@@ -1522,17 +1564,29 @@ function renderLamissQuestion(): void {
   const listening = phase === 'listening' || phase === 'recording';
   updateLamissDucking();
 
-  const heading = question.askedAtSeconds === undefined
-    ? lamissT('question.asks')
-    : lamissT('question.asksAt', { time: formatLamissPosition(question.askedAtSeconds) });
+  const asking = question.mode === 'ask';
+  const heading = asking
+    ? lamissT('ask.heading')
+    : question.askedAtSeconds === undefined
+      ? lamissT('question.asks')
+      : lamissT('question.asksAt', { time: formatLamissPosition(question.askedAtSeconds) });
+  if (asking && parts.text.textContent !== lamissT('ask.prompt')) {
+    parts.text.textContent = lamissT('ask.prompt');
+  }
+  parts.cancel.hidden = !asking;
+  parts.cancel.title = lamissT('ask.cancel');
+  parts.cancel.setAttribute('aria-label', lamissT('ask.cancel'));
   if (parts.heading.textContent !== heading) {
     parts.heading.textContent = heading;
   }
   parts.overlay.dataset.phase = phase;
   parts.overlay.dataset.playing = String(!question.holdPaused);
   parts.input.readOnly = !['speaking', 'listening', 'answering'].includes(phase);
-  parts.input.placeholder = lamissT(listening || phase === 'speaking' ? 'question.placeholderSpeak' : 'question.placeholderType');
-  parts.input.setAttribute('aria-label', lamissT('question.yourAnswer'));
+  const speakPlaceholder = listening || phase === 'speaking';
+  parts.input.placeholder = asking
+    ? lamissT(speakPlaceholder ? 'ask.placeholderSpeak' : 'ask.placeholderType')
+    : lamissT(speakPlaceholder ? 'question.placeholderSpeak' : 'question.placeholderType');
+  parts.input.setAttribute('aria-label', lamissT(asking ? 'ask.yourQuestion' : 'question.yourAnswer'));
 
   parts.mic.hidden = !['speaking', 'answering', 'listening', 'recording'].includes(phase);
   parts.mic.dataset.state = listening ? 'listening' : 'idle';
@@ -1543,9 +1597,14 @@ function renderLamissQuestion(): void {
 
   parts.submit.textContent = lamissT(phase === 'feedback'
     ? (question.holdPaused ? 'question.continue' : 'question.close')
-    : phase === 'sending' ? 'question.checkingShort' : 'question.answer');
+    : phase === 'sending'
+      ? (asking ? 'ask.thinkingShort' : 'question.checkingShort')
+      : (asking ? 'ask.send' : 'question.answer'));
   if (phase === 'feedback' && question.feedback) {
-    parts.feedback.textContent = `${lamissT(question.feedback.correct ? 'question.correct' : 'question.notQuite')} ${question.feedback.text}`;
+    // Lamiss's answer to the learner's question is not graded.
+    parts.feedback.textContent = asking
+      ? question.feedback.text
+      : `${lamissT(question.feedback.correct ? 'question.correct' : 'question.notQuite')} ${question.feedback.text}`;
   }
   parts.submit.disabled = phase === 'feedback'
     ? false
@@ -1590,7 +1649,11 @@ function onLamissQuestionSubmit(): void {
   }
   stopLamissSpeech();
   stopLamissListening(true);
-  submitLamissAnswer(parts.input.value.trim());
+  if (lamissQuestion.mode === 'ask') {
+    submitLamissAsk(parts.input.value.trim());
+  } else {
+    submitLamissAnswer(parts.input.value.trim());
+  }
 }
 
 // spokenLanguage comes with a transcribed answer and stays off typed ones.
@@ -1604,6 +1667,95 @@ function submitLamissAnswer(answer: string, spokenLanguage?: string): void {
   lamissQuestion.error = undefined;
   renderLamissQuestion();
   postLamissLive({ type: 'answer', answeredTo: lamissQuestion.eventId, answer, language: spokenLanguage });
+}
+
+// --- Ask Lamiss card (Lamiss#84) -------------------------------------------------
+
+// Opens the card for the learner's own question, already listening. The
+// video keeps playing, quieter while Lamiss listens and speaks. A question
+// Lamiss is asking comes first: then this does nothing.
+function openLamissAsk(): void {
+  if (!lamissLiveVideoId || !lamissLivePort) {
+    showLamissToast(lamissT('ask.startFirst'));
+    return;
+  }
+  if (lamissQuestion) {
+    lamissQuestionParts()?.input.focus();
+    return;
+  }
+  const player = getLamissPlayer();
+  if (!player) {
+    return;
+  }
+  player.append(createLamissQuestion());
+  lamissQuestion = {
+    mode: 'ask', eventId: '', question: lamissT('ask.prompt'), phase: 'listening', queued: false, holdPaused: false
+  };
+  renderLamissQuestion();
+  lamissQuestionParts()?.input.focus();
+  startLamissListening();
+}
+
+function submitLamissAsk(question: string): void {
+  const state = lamissQuestion;
+  if (!state || state.mode !== 'ask' || !question) {
+    return;
+  }
+  // A new question gets a new interactionId; a retry of the same one keeps it.
+  if (!state.askRequestId || state.answer !== question) {
+    state.askRequestId = crypto.randomUUID();
+  }
+  state.answer = question;
+  state.phase = 'sending';
+  state.error = undefined;
+  renderLamissQuestion();
+  postLamissLive({
+    type: 'ask',
+    requestId: state.askRequestId,
+    question,
+    positionMs: (getLamissVideo()?.currentTime ?? 0) * 1000
+  });
+}
+
+type LamissAskResult = Extract<LamissLiveWorkerMessage, { type: 'ask-result' }>;
+
+function onLamissAskResult(result: LamissAskResult): void {
+  const state = lamissQuestion;
+  if (!state || state.mode !== 'ask' || state.askRequestId !== result.requestId || state.phase !== 'sending') {
+    return;
+  }
+  if (!result.ok) {
+    state.phase = 'answering';
+    state.error = lamissT('ask.failed', { error: result.error });
+    renderLamissQuestion();
+    return;
+  }
+  const parts = lamissQuestionParts();
+  if (!parts) {
+    return;
+  }
+  state.phase = 'feedback';
+  state.feedback = { correct: true, text: result.answer };
+  parts.feedback.hidden = false;
+  delete parts.feedback.dataset.correct;
+  renderLamissQuestion();
+  parts.submit.focus();
+
+  state.speakingFeedback = true;
+  updateLamissDucking();
+  void speakLamiss(result.answer, lamissSpeechLanguage(result.language, lamissCaptionLanguage)).then(() => {
+    state.speakingFeedback = false;
+    if (lamissQuestion !== state) {
+      return;
+    }
+    updateLamissDucking();
+    window.clearTimeout(lamissResumeTimer);
+    lamissResumeTimer = window.setTimeout(() => {
+      if (lamissQuestion === state) {
+        hideLamissQuestion();
+      }
+    }, LAMISS_CLOSE_AFTER_FEEDBACK_MS);
+  });
 }
 
 // language: what the backend wrote the feedback in (the learner's tutor
@@ -1737,6 +1889,39 @@ function ensureLamissTimer(button: HTMLButtonElement): void {
     button.after(timer);
   }
   renderLamissTimer();
+}
+
+const LAMISS_ASK_BUTTON_ID = 'lamiss-ask-button';
+
+// A mic next to the question timer while Lamiss runs on this video: opens the
+// Ask Lamiss card, like the Alt+L shortcut (Lamiss#84).
+function ensureLamissAskButton(button: HTMLButtonElement): void {
+  const existing = document.getElementById(LAMISS_ASK_BUTTON_ID) as HTMLButtonElement | null;
+  if (!lamissLiveVideoId || lamissLiveVideoId !== lamissButtonVideoId) {
+    existing?.remove();
+    return;
+  }
+  const ask = existing ?? createLamissAskButton();
+  const after = document.getElementById(LAMISS_TIMER_ID) ?? button;
+  if (ask.previousElementSibling !== after) {
+    after.after(ask);
+  }
+  ask.title = lamissT('ask.button');
+  ask.setAttribute('aria-label', lamissT('ask.button'));
+}
+
+function createLamissAskButton(): HTMLButtonElement {
+  const ask = document.createElement('button');
+  ask.id = LAMISS_ASK_BUTTON_ID;
+  ask.type = 'button';
+  ask.className = 'lamiss-ask-button';
+  // Static markup with no user data.
+  ask.innerHTML = LAMISS_MIC_ICON;
+  ask.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openLamissAsk();
+  });
+  return ask;
 }
 
 function createLamissTimer(): HTMLButtonElement {

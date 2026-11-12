@@ -219,6 +219,10 @@ async function saveDeviceSettings(change: Partial<LamissDeviceSettings>): Promis
 const LAMISS_START_LEARNING_MESSAGE = 'lamiss:start-learning';
 // Popup → the active YouTube tab: replies { videoId, buttonState }.
 const LAMISS_PAGE_STATUS_MESSAGE = 'lamiss:page-status';
+// Worker → the active YouTube tab: the Ask Lamiss shortcut was pressed (Lamiss#84).
+const LAMISS_OPEN_ASK_MESSAGE = 'lamiss:open-ask';
+// The chrome.commands name of that shortcut (manifest.json).
+const LAMISS_ASK_COMMAND = 'ask-lamiss';
 
 type LamissPageStatus = { videoId: string | null; buttonState: string };
 

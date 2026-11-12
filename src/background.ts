@@ -691,6 +691,9 @@ type LamissLiveClientMessage =
   // playing: false reports where a paused viewer is; it never triggers a question.
   | { type: 'position'; positionMs: number; playing?: boolean }
   | { type: 'answer'; answeredTo: string; answer: string; language?: string }
+  // The learner's own question from the Ask Lamiss card (Lamiss#84); requestId
+  // is its interactionId, so a retry gets the stored answer.
+  | { type: 'ask'; requestId: string; question: string; positionMs: number }
   | { type: 'listen'; requestId: string }
   | { type: 'stop-listening'; requestId: string; discard: boolean }
   | { type: 'speak'; requestId: string; text: string; language?: string }
@@ -712,6 +715,10 @@ type LamissLiveWorkerMessage =
   | { type: 'status'; state: LamissLiveState; detail?: string }
   | { type: 'server'; message: LamissServerMessage }
   | { type: 'answer-queued' }
+  // Lamiss's answer to an 'ask': language is the learner's tutor language,
+  // the one she answers in when set.
+  | { type: 'ask-result'; requestId: string; ok: true; answer: string; language: string | null }
+  | { type: 'ask-result'; requestId: string; ok: false; error: string; retryable: boolean }
   | { type: 'listen-event'; requestId: string; event: LamissListenEvent }
   | { type: 'speech-event'; requestId: string; event: LamissSpeechEvent };
 
@@ -994,6 +1001,49 @@ function reconnectLiveConnections(accessToken: string): void {
   }
 }
 
+// The Ask Lamiss card's question goes to the backend like the chat panel's;
+// the chat panel then reloads its history to show it (Lamiss#84).
+async function askFromCard(live: LamissLiveConnection, message: { requestId: string; question: string; positionMs: number }): Promise<void> {
+  const learningSessionId = live.learningSessionId;
+  if (learningSessionId === undefined || typeof message.question !== 'string' || !message.question.trim()) {
+    postLive(live, { type: 'ask-result', requestId: message.requestId, ok: false, error: lamissT('ask.notConnected'), retryable: true });
+    return;
+  }
+  const [result, preferences] = await Promise.all([
+    askLamiss({
+      interactionId: message.requestId,
+      learningSessionId,
+      videoPositionMs: Number.isFinite(message.positionMs) ? Math.max(0, Math.round(message.positionMs)) : 0,
+      text: message.question.trim()
+    }),
+    fetchPreferences()
+  ]);
+  if (!result.ok) {
+    postLive(live, { type: 'ask-result', requestId: message.requestId, ok: false, error: result.error, retryable: result.retryable });
+    return;
+  }
+  postLive(live, {
+    type: 'ask-result',
+    requestId: message.requestId,
+    ok: true,
+    answer: result.data.answer?.trim() || lamissT('chat.emptyAnswer'),
+    language: preferences.ok ? lamissTutorLanguage(preferences.data) : null
+  });
+  postLiveLog(live, { type: 'resync' });
+}
+
+// The Ask Lamiss shortcut (manifest "commands"): opens the card on the active YouTube tab.
+chrome.commands?.onCommand.addListener((command) => {
+  if (command !== LAMISS_ASK_COMMAND) {
+    return;
+  }
+  void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+    if (tab?.id !== undefined && isYouTubePageUrl(tab.url)) {
+      void chrome.tabs.sendMessage(tab.id, { type: LAMISS_OPEN_ASK_MESSAGE }).catch(() => undefined);
+    }
+  });
+});
+
 function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClientMessage): void {
   const socket = live.socket?.readyState === WebSocket.OPEN ? live.socket : undefined;
 
@@ -1028,6 +1078,9 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
       } else {
         postLive(live, { type: 'answer-queued' });
       }
+      break;
+    case 'ask':
+      void askFromCard(live, message);
       break;
     case 'listen':
       listeningPorts.set(message.requestId, live);
