@@ -158,6 +158,18 @@ reporting positions while a question plays over the video. The worker stores
 with each pending question whether it was paused, so a question replayed after
 a reconnect pauses only if it did the first time.
 
+**Ask Lamiss** (Lamiss#84). While Lamiss runs on a video, **Alt+L** (a
+`chrome.commands` shortcut, changeable in `chrome://extensions/shortcuts`) or the
+mic button next to the question timer opens the question card for the
+learner's own question, already listening; it can also be typed. The video
+keeps playing at 20% volume while Lamiss listens and answers. The worker sends
+the question to `POST /api/user-interaction/user-asks` (the card's request ID is
+the `interactionId`, so a retry gets the stored answer) and tells the chat panel
+to reload its history. The answer shows in the card without a grade, is read
+aloud in the tutor language (or the video's), and the card closes 4 s later.
+**Escape** or **✕** cancels. A question Lamiss is asking comes first: the
+shortcut does nothing then.
+
 **Languages** (TDR-0003,
 [docs/TDR-0003-Language-Preferences.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0003-Language-Preferences.md)).
 Three languages, each set apart from the others:

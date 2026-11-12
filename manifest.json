@@ -21,6 +21,14 @@
   "host_permissions": [
     "https://www.youtube.com/*"
   ],
+  "commands": {
+    "ask-lamiss": {
+      "suggested_key": {
+        "default": "Alt+L"
+      },
+      "description": "Ask Lamiss a question about the video"
+    }
+  },
   "background": {
     "service_worker": "background.js"
   },

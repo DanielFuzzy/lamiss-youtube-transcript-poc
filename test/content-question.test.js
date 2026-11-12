@@ -337,3 +337,70 @@ test('app language: the open question card switches language at once, the questi
   assert.equal(card.querySelector('.lamiss-question__heading').textContent, 'Lamiss pregunta · 0:42');
   assert.equal(card.querySelector('.lamiss-question__text').textContent, 'What did she say?');
 });
+
+// --- Ask Lamiss card (Lamiss#84) ----------------------------------------------
+
+test('ask lamiss: the card opens listening, sends the spoken question, reads the answer over the quieter video, then closes', async () => {
+  const page = questionEnv();
+  await flush();
+  page.video.volume = 0.8;
+
+  page.env.run('openLamissAsk()');
+  assert.equal(page.cardOpen(), true);
+  assert.equal(page.phase(), 'listening');
+  assert.equal(page.posted.at(-1).type, 'listen');
+  assert.equal(page.video.volume, 0.2, 'quieter while Lamiss listens');
+  assert.equal(page.video.paused, false, 'the video keeps playing');
+
+  page.listenEvent({ type: 'transcribed', text: 'What is he holding?' });
+  const ask = page.posted.at(-1);
+  assert.equal(ask.type, 'ask');
+  assert.equal(ask.question, 'What is he holding?');
+  assert.equal(ask.positionMs, 42_000);
+  assert.equal(page.phase(), 'sending');
+
+  page.env.context.onLamissLiveMessage({ type: 'ask-result', requestId: ask.requestId, ok: true, answer: 'Un paraguas rojo.', language: 'es' });
+  assert.equal(page.phase(), 'feedback');
+  const feedback = page.player.querySelector('.lamiss-question__feedback');
+  assert.equal(feedback.textContent, 'Un paraguas rojo.', 'not graded: no "Correct" in front');
+  assert.deepEqual(page.posted.filter(message => message.type === 'speak').at(-1).language, 'es');
+
+  await page.speechEnded();
+  page.runTimeouts(4000);
+  assert.equal(page.cardOpen(), false);
+  assert.equal(page.video.volume, 0.8, 'volume back');
+  assert.equal(page.video.paused, false);
+});
+
+test('ask lamiss: a failed answer can be sent again with the same interactionId, and Escape cancels', async () => {
+  const page = questionEnv();
+  await flush();
+  page.env.run('openLamissAsk()');
+  page.listenEvent({ type: 'transcribed', text: 'Why?' });
+  const first = page.posted.at(-1);
+  page.env.context.onLamissLiveMessage({ type: 'ask-result', requestId: first.requestId, ok: false, error: 'AI down', retryable: true });
+  assert.equal(page.phase(), 'answering');
+  assert.equal(page.player.querySelector('.lamiss-question__status').textContent, "Lamiss couldn't answer: AI down");
+
+  page.env.run('onLamissQuestionSubmit()');
+  assert.equal(page.posted.at(-1).type, 'ask');
+  assert.equal(page.posted.at(-1).requestId, first.requestId);
+
+  const overlay = page.env.context.document.getElementById('lamiss-question');
+  for (const listener of overlay.listeners.keydown) {
+    listener({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  }
+  assert.equal(page.cardOpen(), false);
+});
+
+test('ask lamiss: a question Lamiss is asking comes first', async () => {
+  const page = questionEnv();
+  await flush();
+  page.server({ type: 'ASK_QUESTION', eventId: 'e1', question: 'What did she say?' });
+  const listens = page.posted.filter(message => message.type === 'listen').length;
+
+  page.env.run('openLamissAsk()');
+
+  assert.equal(page.env.run('lamissQuestion.mode'), 'answer');
+  assert.equal(page.posted.filter(message => message.type === 'listen').length, listens);
+});

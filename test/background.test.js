@@ -607,3 +607,85 @@ test('sign-in: a content script cannot accept the notice for the user', async ()
   assert.equal(env.local.data.has('lamissPrivacyNotice'), false);
   assert.equal(env.identity.launches.length, 0);
 });
+
+// --- Ask Lamiss card (Lamiss#84) ----------------------------------------------
+
+function askBackend(extra = async () => undefined) {
+  return async (url, init) => {
+    const handled = await extra(url, init);
+    if (handled) {
+      return handled;
+    }
+    if (url.endsWith('/api/learning-sessions')) {
+      return { json: { learningSessionId: 42, videoId: 1, videoExternalId: 'vid', resumed: false, aiKnowledgeReady: true } };
+    }
+    if (url.endsWith('/api/auth/ws-ticket')) {
+      return { json: { ticket: 'ticket', expiresAt: futureIso(30_000) } };
+    }
+    if (url.endsWith('/api/me/preferences')) {
+      return { json: { nativeLanguage: null, learningLanguage: null, tutorLanguage: 'es', proficiencyLevel: null, tutor: { kindness: 'BALANCED', responseLength: 'NORMAL', encouragement: true }, voice: { voiceId: null, speed: 1 } } };
+    }
+    return undefined;
+  };
+}
+
+test('ask lamiss: the card\'s question goes to user-asks with the session, and the answer comes back with the tutor language', async () => {
+  const env = backgroundEnv({
+    extra: askBackend(async (url) => url.endsWith('/api/user-interaction/user-asks')
+      ? { json: { question: 'What is he holding?', answer: ' Un paraguas rojo. ' } }
+      : undefined)
+  });
+  signIn(env);
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'start', videoId: 'vid' });
+  await flush();
+
+  port.send({ type: 'ask', requestId: 'q-1', question: ' What is he holding? ', positionMs: 12_345.6 });
+  await flush();
+
+  const askCall = env.fetchCalls.find(call => call.url.endsWith('/api/user-interaction/user-asks'));
+  assert.equal(askCall.headers.get('authorization'), 'Bearer secret-token');
+  assert.deepEqual(Object.fromEntries(askCall.init.body.entries()), {
+    interactionId: 'q-1', learningSessionId: '42', videoPositionMs: '12346', question: 'What is he holding?'
+  });
+  assert.deepEqual(port.messages.find(message => message.type === 'ask-result'),
+    { type: 'ask-result', requestId: 'q-1', ok: true, answer: 'Un paraguas rojo.', language: 'es' });
+  // The chat panel reloads its history to show the exchange.
+  assert.ok(env.runtimeSent.some(message => message.source === 'lamiss-live-log' && message.event.type === 'resync' && message.learningSessionId === 42));
+});
+
+test('ask lamiss: before the session is ready, or when the backend fails, the card gets an error it can retry', async () => {
+  const env = backgroundEnv({
+    extra: askBackend(async (url) => url.endsWith('/api/user-interaction/user-asks')
+      ? { status: 503, json: { detail: 'The AI provider is temporarily unavailable', retryable: true } }
+      : undefined)
+  });
+  signIn(env);
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'ask', requestId: 'q-0', question: 'Too early?', positionMs: 0 });
+  await flush();
+  assert.deepEqual(port.messages.find(message => message.type === 'ask-result'),
+    { type: 'ask-result', requestId: 'q-0', ok: false, error: "Lamiss isn't connected to this video yet. Try again in a moment.", retryable: true });
+
+  port.send({ type: 'start', videoId: 'vid' });
+  await flush();
+  port.send({ type: 'ask', requestId: 'q-1', question: 'Now?', positionMs: 0 });
+  await flush();
+  assert.deepEqual(port.messages.filter(message => message.type === 'ask-result').at(-1),
+    { type: 'ask-result', requestId: 'q-1', ok: false, error: 'The AI provider is temporarily unavailable', retryable: true });
+});
+
+test('ask lamiss: the Alt+L shortcut opens the card on the active YouTube tab only', async () => {
+  const youTube = backgroundEnv({ tabs: [{ id: 7, url: 'https://www.youtube.com/watch?v=LeRylkDym54' }] });
+  youTube.chrome.commands.onCommand.listeners[0]('ask-lamiss');
+  youTube.chrome.commands.onCommand.listeners[0]('something-else');
+  await flush();
+  assert.deepEqual(youTube.tabsSent, [{ tabId: 7, message: { type: 'lamiss:open-ask' } }]);
+
+  const elsewhere = backgroundEnv({ tabs: [{ id: 8, url: 'https://example.com/' }] });
+  elsewhere.chrome.commands.onCommand.listeners[0]('ask-lamiss');
+  await flush();
+  assert.deepEqual(elsewhere.tabsSent, []);
+});
