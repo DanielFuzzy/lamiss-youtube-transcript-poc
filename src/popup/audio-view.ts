@@ -475,8 +475,29 @@ audioVoicePreviewButton.addEventListener('click', async () => {
 
 audioMicMeter.append(...Array.from({ length: AUDIO_METER_BARS }, () => document.createElement('span')));
 
+// "Hey Lamiss" (Lamiss#85): shown only when this build has a wake word model.
+const wakeWordRow = popupElement<HTMLDivElement>('wakeWordRow');
+const wakeWordLabel = popupElement<HTMLLabelElement>('wakeWordLabel');
+const wakeWordHint = popupElement<HTMLParagraphElement>('wakeWordHint');
+const wakeWordInput = popupElement<HTMLInputElement>('wakeWordInput');
+
+async function loadWakeWord(): Promise<void> {
+  const [config, settings] = await Promise.all([readWakeWordConfig(), readWakeWordSettings()]);
+  wakeWordRow.hidden = !config;
+  if (!config) {
+    return;
+  }
+  wakeWordLabel.textContent = lamissT('wake.toggle', { phrase: config.phrase });
+  wakeWordHint.textContent = lamissT('wake.hint', { phrase: config.phrase })
+    + (config.developmentOnly ? ` ${lamissT('wake.developmentModel')}` : '');
+  wakeWordInput.checked = settings.enabled;
+}
+
+wakeWordInput.addEventListener('change', () => void saveWakeWordSettings({ enabled: wakeWordInput.checked }));
+
 registerPopupView('audio', {
   enter: () => {
+    void loadWakeWord();
     setPopupSaveState(audioSaveState, 'idle');
     setAudioMessage(audioMicMessage, '');
     setAudioMessage(audioSpeakerMessage, '');

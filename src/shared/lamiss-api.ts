@@ -213,6 +213,44 @@ async function saveDeviceSettings(change: Partial<LamissDeviceSettings>): Promis
   return next;
 }
 
+// --- "Hey Lamiss" wake word (Lamiss#85) --------------------------------------------
+
+// On or off for this browser profile; off until the user turns it on. While
+// on and a Lamiss session runs, the offscreen page keeps the microphone open
+// and detects the phrase on this computer: no audio leaves it until the
+// Ask Lamiss card opens.
+type LamissWakeWordSettings = { enabled: boolean };
+
+const LAMISS_WAKE_WORD_SETTINGS_KEY = 'lamissWakeWordSettings';
+
+async function readWakeWordSettings(): Promise<LamissWakeWordSettings> {
+  try {
+    const stored = await chrome.storage.local.get(LAMISS_WAKE_WORD_SETTINGS_KEY);
+    return { enabled: (stored[LAMISS_WAKE_WORD_SETTINGS_KEY] as Partial<LamissWakeWordSettings> | undefined)?.enabled === true };
+  } catch {
+    return { enabled: false };
+  }
+}
+
+function saveWakeWordSettings(settings: LamissWakeWordSettings): Promise<void> {
+  return chrome.storage.local.set({ [LAMISS_WAKE_WORD_SETTINGS_KEY]: settings });
+}
+
+// wakeword/model.json, written by the build when it includes a wake word
+// model: the phrase to say, the model file, and its detection threshold.
+// developmentOnly: a model for local builds only (its license forbids release).
+type LamissWakeWordConfig = { phrase: string; model: string; threshold: number; developmentOnly: boolean };
+
+// Undefined when this build has no wake word model.
+async function readWakeWordConfig(): Promise<LamissWakeWordConfig | undefined> {
+  try {
+    const response = await fetch(chrome.runtime.getURL('wakeword/model.json'));
+    return response.ok ? await response.json() as LamissWakeWordConfig : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // --- Popup ↔ content script (TDR-0002) -------------------------------------------
 
 // Popup → the active YouTube tab: same as clicking the in-page Lamiss button.
