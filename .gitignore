@@ -3,3 +3,4 @@ compiled/
 .env
 .DS_Store
 dist/
+vendor/

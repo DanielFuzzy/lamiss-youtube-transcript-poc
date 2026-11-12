@@ -1030,6 +1030,12 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
     return;
   }
 
+  if (message.type === 'wake-state') {
+    lamissWake = { listening: message.listening, phrase: message.phrase };
+    scheduleEnsureLamissButton();
+    return;
+  }
+
   const server = message.message;
   switch (server.type) {
     case 'PAUSE_VIDEO':
@@ -1893,6 +1899,9 @@ function ensureLamissTimer(button: HTMLButtonElement): void {
 
 const LAMISS_ASK_BUTTON_ID = 'lamiss-ask-button';
 
+// Whether the offscreen page listens for the wake word (Lamiss#85), shown on the Ask button.
+let lamissWake: { listening: boolean; phrase?: string } = { listening: false };
+
 // A mic next to the question timer while Lamiss runs on this video: opens the
 // Ask Lamiss card, like the Alt+L shortcut (Lamiss#84).
 function ensureLamissAskButton(button: HTMLButtonElement): void {
@@ -1906,8 +1915,13 @@ function ensureLamissAskButton(button: HTMLButtonElement): void {
   if (ask.previousElementSibling !== after) {
     after.after(ask);
   }
-  ask.title = lamissT('ask.button');
-  ask.setAttribute('aria-label', lamissT('ask.button'));
+  const listening = lamissWake.listening && Boolean(lamissWake.phrase);
+  const title = listening
+    ? `${lamissT('ask.button')} · ${lamissT('wake.listening', { phrase: lamissWake.phrase ?? '' })}`
+    : lamissT('ask.button');
+  ask.title = title;
+  ask.setAttribute('aria-label', title);
+  ask.classList.toggle('lamiss-ask-button--listening', listening);
 }
 
 function createLamissAskButton(): HTMLButtonElement {

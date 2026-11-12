@@ -170,6 +170,19 @@ aloud in the tutor language (or the video's), and the card closes 4 s later.
 **Escape** or **✕** cancels. A question Lamiss is asking comes first: the
 shortcut does nothing then.
 
+**"Hey Lamiss"** (Lamiss#85, [docs/wake-word.md](docs/wake-word.md)). An
+opt-in switch in Audio & Voice (`lamissWakeWordSettings`, off by default),
+shown only in builds with a wake word model. While it is on and a Lamiss
+session runs, the offscreen page keeps the microphone open and detects the
+phrase on this computer with openWakeWord models run by onnxruntime-web
+(`offscreen/wake-word.ts`); a detection opens the Ask Lamiss card on the active
+tab if Lamiss runs there. Nothing is detected while Lamiss speaks (and 1 s
+after), while she listens, or within 3 s of a detection. A green dot on the
+Ask button shows it is listening. The models are never committed:
+`npm run fetch:wakeword` downloads them; development builds use openWakeWord's
+non-commercial "hey jarvis" until the "Hey Lamiss" model is trained, and
+release builds never include it.
+
 **Languages** (TDR-0003,
 [docs/TDR-0003-Language-Preferences.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0003-Language-Preferences.md)).
 Three languages, each set apart from the others:

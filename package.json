@@ -10,10 +10,12 @@
     "package:staging": "node scripts/package.js --env staging",
     "package:production": "node scripts/package.js --env production",
     "phase3:verify": "npm run build && node scripts/phase3-verify.js",
-    "package:store-draft": "node scripts/package.js --env store-draft"
+    "package:store-draft": "node scripts/package.js --env store-draft",
+    "fetch:wakeword": "node scripts/fetch-wakeword-models.js"
   },
   "devDependencies": {
     "@types/chrome": "latest",
+    "onnxruntime-web": "1.31.1",
     "playwright": "^1.63.0",
     "typescript": "5.4.5"
   }

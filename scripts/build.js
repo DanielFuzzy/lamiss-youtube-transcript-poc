@@ -99,7 +99,44 @@ fs.writeFileSync(path.join(outDir, 'shared', 'lamiss-config.js'), [
   ''
 ].join('\n'));
 
+// "Hey Lamiss" (Lamiss#85): the wake word files, only when a wake word model
+// is available (npm run fetch:wakeword; never committed). Release builds take
+// only the real "Hey Lamiss" model; development builds fall back to
+// openWakeWord's "hey jarvis", whose non-commercial license forbids release.
+// Without a model, nothing is copied: no 14 MB WebAssembly runtime, and the
+// popup hides the switch.
+const WAKE_WORD_MODELS = [
+  { file: 'vendor/openwakeword/hey_lamiss.onnx', phrase: 'Hey Lamiss', developmentOnly: false },
+  { file: 'vendor/openwakeword/dev/hey_jarvis_v0.1.onnx', phrase: 'Hey Jarvis', developmentOnly: true }
+];
+const wakeWord = WAKE_WORD_MODELS.find(model => (!model.developmentOnly || config.environment === 'development')
+  && fs.existsSync(path.join(root, model.file)));
+const wakeWordFiles = [
+  ['vendor/openwakeword/melspectrogram.onnx', 'wakeword/melspectrogram.onnx'],
+  ['vendor/openwakeword/embedding_model.onnx', 'wakeword/embedding_model.onnx'],
+  ['node_modules/onnxruntime-web/dist/ort.wasm.min.js', 'vendor/onnxruntime/ort.wasm.min.js'],
+  ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs', 'vendor/onnxruntime/ort-wasm-simd-threaded.mjs'],
+  ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm', 'vendor/onnxruntime/ort-wasm-simd-threaded.wasm'],
+  ['src/offscreen/wake-worklet.js', 'offscreen/wake-worklet.js']
+];
+fs.rmSync(path.join(outDir, 'wakeword'), { recursive: true, force: true });
+fs.rmSync(path.join(outDir, 'vendor'), { recursive: true, force: true });
+fs.rmSync(path.join(outDir, 'offscreen', 'wake-worklet.js'), { force: true });
+if (wakeWord) {
+  for (const [source, destination] of wakeWordFiles) {
+    copyFile(source, destination);
+  }
+  copyFile(wakeWord.file, 'wakeword/wake-word.onnx');
+  fs.writeFileSync(path.join(outDir, 'wakeword', 'model.json'), `${JSON.stringify({
+    phrase: wakeWord.phrase, model: 'wake-word.onnx', threshold: 0.5, developmentOnly: wakeWord.developmentOnly
+  }, null, 2)}\n`);
+}
+
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+// onnxruntime-web compiles WebAssembly, which extension pages refuse without this.
+if (wakeWord) {
+  manifest.content_security_policy = { extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" };
+}
 // The fixed key pins the extension ID, which the Google OAuth redirect URI
 // (https://<id>.chromiumapp.org/) and the backend's CORS allowlist depend on.
 // The Chrome Web Store refuses it: the store item has its own ID.
@@ -119,3 +156,6 @@ if (!manifest.host_permissions.includes(backendPermission)) {
 fs.writeFileSync(path.join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`Lamiss build: wrote ${path.relative(root, outDir) || '.'}/ (${config.environment}) for the backend at ${apiOrigin} (${wsOrigin}).`);
+console.log(wakeWord
+  ? `Lamiss build: wake word "${wakeWord.phrase}"${wakeWord.developmentOnly ? ' (development model, not for release)' : ''}.`
+  : 'Lamiss build: no wake word model (npm run fetch:wakeword), "Hey Lamiss" is off in this build.');

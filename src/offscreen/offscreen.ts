@@ -196,6 +196,7 @@ function stopSpeaking(): void {
     speaking.audio.pause();
     URL.revokeObjectURL(speaking.url);
     speaking = null;
+    wakeQuietUntil = Date.now() + WAKE_QUIET_AFTER_SPEECH_MS;
   }
 }
 
@@ -234,6 +235,147 @@ async function speak(requestId: string, text: string, language: string | undefin
   }
 }
 
+// --- "Hey Lamiss" (Lamiss#85) -----------------------------------------------------
+
+// After a detection, none for this long; nor while Lamiss speaks and this
+// long after, nor while she listens for an answer or a question: her voice
+// and the learner's answer must not trigger it.
+const WAKE_COOLDOWN_MS = 3000;
+const WAKE_QUIET_AFTER_SPEECH_MS = 1000;
+
+type WakeListener = {
+  stream: MediaStream;
+  audioContext: AudioContext;
+  pipeline: WakeWordPipeline;
+  config: LamissWakeWordConfig;
+  // Chunks are scored one after the other.
+  queue: Promise<void>;
+  lastDetectedAt: number;
+};
+
+let wakeListener: WakeListener | null = null;
+let wakeStarting = false;
+let wakeQuietUntil = 0;
+let wakePipeline: Promise<{ pipeline: WakeWordPipeline; config: LamissWakeWordConfig }> | undefined;
+
+// Whether a score is a detection: at or above the model's threshold, and
+// not while detections are held back.
+function lamissWakeDetected(score: number, threshold: number, now: number, lastDetectedAt: number, quietUntil: number, busy: boolean): boolean {
+  return score >= threshold && !busy && now >= quietUntil && now - lastDetectedAt >= WAKE_COOLDOWN_MS;
+}
+
+function emitWakeEvent(event: { type: 'detected' } | { type: 'failed'; error: string; micDenied?: boolean }): void {
+  void chrome.runtime.sendMessage({ source: 'lamiss-offscreen', wake: event });
+}
+
+// onnxruntime-web, loaded the first time the wake word is turned on: its
+// WebAssembly is large and only builds with a wake word model ship it.
+function loadOnnxRuntime(): Promise<WakeOrt> {
+  const scope = globalThis as unknown as { ort?: WakeOrt & { env: { wasm: { numThreads: number; wasmPaths: string } } } };
+  const configure = () => {
+    const runtime = scope.ort!;
+    // Extension pages aren't cross-origin isolated: no threads.
+    runtime.env.wasm.numThreads = 1;
+    runtime.env.wasm.wasmPaths = chrome.runtime.getURL('vendor/onnxruntime/');
+    return runtime;
+  };
+  if (scope.ort) {
+    return Promise.resolve(configure());
+  }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('vendor/onnxruntime/ort.wasm.min.js');
+    script.addEventListener('load', () => resolve(configure()));
+    script.addEventListener('error', () => reject(new Error('onnxruntime-web is missing from this build')));
+    document.head.append(script);
+  });
+}
+
+async function loadWakeModel(file: string): Promise<Uint8Array> {
+  const response = await fetch(chrome.runtime.getURL(`wakeword/${file}`));
+  if (!response.ok) {
+    throw new Error(`wake word model ${file} is missing from this build`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function createWakePipeline(): Promise<{ pipeline: WakeWordPipeline; config: LamissWakeWordConfig }> {
+  wakePipeline ??= (async () => {
+    const config = await readWakeWordConfig();
+    if (!config) {
+      throw new Error('this build has no wake word model');
+    }
+    const [runtime, melspectrogram, embedding, wakeWord] = await Promise.all([
+      loadOnnxRuntime(), loadWakeModel('melspectrogram.onnx'), loadWakeModel('embedding_model.onnx'), loadWakeModel(config.model)
+    ]);
+    return { pipeline: await WakeWordPipeline.create(runtime, { melspectrogram, embedding, wakeWord }), config };
+  })().catch((error: unknown) => {
+    wakePipeline = undefined;
+    throw error;
+  });
+  return wakePipeline;
+}
+
+async function startWakeListening(micDeviceId: string | undefined): Promise<void> {
+  if (wakeListener || wakeStarting) {
+    return;
+  }
+  wakeStarting = true;
+  try {
+    const { pipeline, config } = await createWakePipeline();
+    const stream = await getMicrophoneStream(micDeviceId, { echoCancellation: true, noiseSuppression: true });
+    if (!wakeStarting) {
+      // Turned off while starting.
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    const audioContext = new AudioContext({ sampleRate: WAKE_SAMPLE_RATE });
+    await audioContext.audioWorklet.addModule(chrome.runtime.getURL('offscreen/wake-worklet.js'));
+    const node = new AudioWorkletNode(audioContext, 'lamiss-wake-capture');
+    audioContext.createMediaStreamSource(stream).connect(node);
+    const listener: WakeListener = { stream, audioContext, pipeline, config, queue: Promise.resolve(), lastDetectedAt: 0 };
+    wakeListener = listener;
+    node.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      // Web Audio's [-1, 1] floats, as the int16 values openWakeWord expects.
+      const samples = Float32Array.from(event.data, sample => sample * 32767);
+      listener.queue = listener.queue.then(async () => {
+        if (wakeListener !== listener) {
+          return;
+        }
+        const score = await listener.pipeline.process(samples);
+        const now = Date.now();
+        if (score !== undefined && lamissWakeDetected(score, listener.config.threshold, now, listener.lastDetectedAt, wakeQuietUntil, speaking !== null || listenSession !== null)) {
+          listener.lastDetectedAt = now;
+          console.log('Lamiss POC: wake word detected, score =', score.toFixed(3));
+          emitWakeEvent({ type: 'detected' });
+        }
+      }).catch((error: unknown) => console.warn('Lamiss POC: wake word scoring failed:', error));
+    };
+    await audioContext.resume().catch(() => undefined);
+  } catch (error) {
+    const name = error instanceof DOMException ? error.name : '';
+    console.warn('Lamiss POC: wake word listening failed:', error);
+    emitWakeEvent({
+      type: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      micDenied: name === 'NotAllowedError' || name === 'SecurityError'
+    });
+  } finally {
+    wakeStarting = false;
+  }
+}
+
+function stopWakeListening(): void {
+  wakeStarting = false;
+  const listener = wakeListener;
+  if (!listener) {
+    return;
+  }
+  wakeListener = null;
+  listener.stream.getTracks().forEach(track => track.stop());
+  void listener.audioContext.close();
+}
+
 type OffscreenCommand = {
   target?: string;
   type?: string;
@@ -265,6 +407,14 @@ chrome.runtime.onMessage.addListener((message: OffscreenCommand, sender) => {
     if (speaking?.requestId === message.requestId) {
       stopSpeaking();
     }
+    return false;
+  }
+  if (message.type === 'wake-start') {
+    void startWakeListening(optionalString(message.micDeviceId));
+    return false;
+  }
+  if (message.type === 'wake-stop') {
+    stopWakeListening();
     return false;
   }
   if (message.type === 'listen' && typeof message.requestId === 'string') {
