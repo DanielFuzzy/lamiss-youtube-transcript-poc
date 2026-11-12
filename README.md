@@ -33,6 +33,20 @@ this repository or to the build.
 
 `compiled/` is the unpacked extension. It is build output and is not committed.
 
+### Switch between the local backend and PRE (Railway)
+
+| Command | Backend |
+|---|---|
+| `npm run build:local` | your local backend (`http://localhost:8080`, or `LAMISS_API_URL` from `.env`) |
+| `npm run build:pre` | PRE on Railway (`https://lamiss-production.up.railway.app`, `wss://` for the live session) |
+
+Both write `compiled/`. After switching, click **Reload** on Lamiss in
+`chrome://extensions` and sign in again: the sign-in is per backend. PRE keeps
+the same extension ID as local, so PRE needs `chrome-extension://fjjelpamfjfkndcgjdfmkjglkimhokec`
+in its `LAMISS_CORS_ALLOWED_ORIGINS` and the same `GOOGLE_CLIENT_ID` as the
+extension. PRE's address and client ID live in `config/environments.json`
+(`pre`); `.env` is ignored for it.
+
 These variables only apply to **development** builds. Each environment's backend
 (development, staging, production) is set in `config/environments.json`; the
 staging and production packages for testers and the Chrome Web Store are made

@@ -5,7 +5,8 @@
 
 // store-draft: a store package (no manifest key) for a local backend, only to
 // create the Chrome Web Store item as a draft; never submitted for review.
-const ENVIRONMENTS = ['development', 'staging', 'production', 'store-draft'];
+// pre: the cloud backend on Railway for the unpacked extension.
+const ENVIRONMENTS = ['development', 'pre', 'staging', 'production', 'store-draft'];
 
 // Hosts that only make sense on a developer's machine or private network.
 function isLocalOrPrivateHost(hostname) {
@@ -61,7 +62,7 @@ function checkGoogleClientId(clientId) {
  * environments: the parsed config/environments.json; name: the environment
  * to build; env: process.env. Development may take LAMISS_API_URL and
  * LAMISS_GOOGLE_CLIENT_ID from env (custom endpoints for local testing);
- * staging and production refuse them, need https on a public host, and need
+ * pre, staging and production refuse them, need https on a public host, and need
  * a Google client ID.
  */
 function resolveBuildConfig(environments, name, env = {}) {
