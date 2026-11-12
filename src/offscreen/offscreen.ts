@@ -10,27 +10,122 @@
 // speakerDeviceId and volume with speak); a missing device means the default.
 
 const LISTEN_SAMPLE_MS = 50;
-const LISTEN_CALIBRATION_MS = 300;
 // The user has this long to start talking before Lamiss stops listening.
-const LISTEN_NO_SPEECH_TIMEOUT_MS = 5000;
-// Speech must last this long to count, so a click or a cough doesn't.
+const LISTEN_NO_SPEECH_TIMEOUT_MS = 8000;
+// Speech must last this long to count, so a click or a cough doesn't; dips
+// between syllables up to LISTEN_SPEECH_GAP_MS don't restart the count.
 const LISTEN_SPEECH_START_MS = 200;
+const LISTEN_SPEECH_GAP_MS = 100;
 // This much silence after speech ends the answer.
 const LISTEN_END_SILENCE_MS = 1800;
 const LISTEN_MAX_ANSWER_MS = 60_000;
 const LISTEN_MIN_SPEECH_LEVEL = 0.015;
+// Background noise is the 10th percentile of the levels of the last
+// LISTEN_NOISE_WINDOW_MS (Lamiss#87): speech has pauses between words, so
+// speech that starts at once can't pass itself off as noise, as it could
+// when the first 300 ms were averaged. Speech counts above 2.5× that.
+const LISTEN_NOISE_WINDOW_MS = 2500;
+const LISTEN_NOISE_PERCENTILE = 0.1;
+const LISTEN_SPEECH_OVER_NOISE = 2.5;
+// Until LISTEN_NOISE_MIN_HISTORY_MS of levels exist, only a clearly spoken
+// level counts as speech, so an answer that starts immediately is caught.
+const LISTEN_NOISE_MIN_HISTORY_MS = 500;
+const LISTEN_EARLY_SPEECH_LEVEL = 0.05;
+// The microphone stays open this long after an attempt, so a retry starts at
+// once, with the background noise already known.
+const LISTEN_MIC_IDLE_MS = 15_000;
+
+type LevelSample = { at: number; level: number };
+
+// The background noise level: the LISTEN_NOISE_PERCENTILE of the levels of the
+// last LISTEN_NOISE_WINDOW_MS, or undefined until LISTEN_NOISE_MIN_HISTORY_MS of them exist.
+function lamissNoiseFloor(history: LevelSample[], now: number): number | undefined {
+  const recent = history.filter(sample => now - sample.at <= LISTEN_NOISE_WINDOW_MS);
+  if (recent.length === 0 || now - recent[0].at < LISTEN_NOISE_MIN_HISTORY_MS) {
+    return undefined;
+  }
+  const levels = recent.map(sample => sample.level).sort((a, b) => a - b);
+  return levels[Math.floor(LISTEN_NOISE_PERCENTILE * (levels.length - 1))];
+}
+
+type SpeechDecision = 'waiting' | 'speech-started' | 'speaking' | 'speech-ended' | 'no-speech';
+
+// Decides, from a level sampled every LISTEN_SAMPLE_MS, when speech starts and
+// ends. history: the microphone's recent levels, newest last, including the
+// one being fed; it may reach back before this attempt (a warm microphone).
+class SpeechDetector {
+  threshold = LISTEN_EARLY_SPEECH_LEVEL;
+  floor: number | undefined;
+  peak = 0;
+  private loudSince: number | undefined;
+  private lastLoudAt = 0;
+  private speechStartedAt: number | undefined;
+  private lastSpeechAt = 0;
+
+  constructor(private readonly history: LevelSample[], private readonly startedAt: number) {}
+
+  feed(level: number, now: number): SpeechDecision {
+    this.peak = Math.max(this.peak, level);
+    if (this.speechStartedAt === undefined) {
+      this.floor = lamissNoiseFloor(this.history, now);
+      this.threshold = this.floor === undefined
+        ? LISTEN_EARLY_SPEECH_LEVEL
+        : Math.max(LISTEN_MIN_SPEECH_LEVEL, this.floor * LISTEN_SPEECH_OVER_NOISE);
+      if (level > this.threshold) {
+        this.loudSince ??= now;
+        this.lastLoudAt = now;
+        if (now - this.loudSince >= LISTEN_SPEECH_START_MS) {
+          this.speechStartedAt = now;
+          this.lastSpeechAt = now;
+          return 'speech-started';
+        }
+        return 'waiting';
+      }
+      if (this.loudSince !== undefined && now - this.lastLoudAt > LISTEN_SPEECH_GAP_MS) {
+        this.loudSince = undefined;
+      }
+      return this.loudSince === undefined && now - this.startedAt >= LISTEN_NO_SPEECH_TIMEOUT_MS ? 'no-speech' : 'waiting';
+    }
+    // The threshold stays as it was when speech started: the window now holds
+    // speech, which would raise it and cut the answer short.
+    if (level > this.threshold * 0.7) {
+      this.lastSpeechAt = now;
+    }
+    if (now - this.lastSpeechAt >= LISTEN_END_SILENCE_MS || now - this.speechStartedAt >= LISTEN_MAX_ANSWER_MS) {
+      return 'speech-ended';
+    }
+    return 'speaking';
+  }
+}
+
+// The open microphone: sampled every LISTEN_SAMPLE_MS while open, kept
+// LISTEN_MIC_IDLE_MS after an attempt.
+type Microphone = {
+  deviceId: string | undefined;
+  stream: MediaStream;
+  audioContext: AudioContext;
+  analyser: AnalyserNode;
+  samples: Float32Array;
+  history: LevelSample[];
+  sampler?: number;
+  idleTimer?: number;
+};
 
 type ListenSession = {
   requestId: string;
-  stream: MediaStream;
-  audioContext: AudioContext;
+  microphone: Microphone;
   recorder: MediaRecorder;
   chunks: Blob[];
+  detector?: SpeechDetector;
+  startedAt: number;
+  micReadyMs: number;
   timer?: number;
   discard: boolean;
+  outcome?: string;
   accessToken?: string;
 };
 
+let microphone: Microphone | null = null;
 let listenSession: ListenSession | null = null;
 
 // A 401 here: the worker checks the session and tells everyone if it's gone.
@@ -52,12 +147,77 @@ function audioLevel(analyser: AnalyserNode, samples: Float32Array): number {
   return Math.sqrt(sum / samples.length);
 }
 
+// The microphone that was asked for: the warm one if it is the same device
+// and still live, otherwise a newly opened one.
+async function acquireMicrophone(deviceId: string | undefined): Promise<Microphone> {
+  if (microphone && microphone.deviceId === deviceId && microphone.stream.getTracks().every(track => track.readyState !== 'ended')) {
+    window.clearTimeout(microphone.idleTimer);
+    return microphone;
+  }
+  releaseMicrophone();
+  const stream = await getMicrophoneStream(deviceId, { echoCancellation: true, noiseSuppression: true });
+  const audioContext = new AudioContext();
+  await audioContext.resume().catch(() => undefined);
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 2048;
+  audioContext.createMediaStreamSource(stream).connect(analyser);
+  const opened: Microphone = { deviceId, stream, audioContext, analyser, samples: new Float32Array(analyser.fftSize), history: [] };
+  if (audioContext.state === 'running') {
+    opened.sampler = window.setInterval(() => sampleMicrophone(opened), LISTEN_SAMPLE_MS);
+  }
+  microphone = opened;
+  return opened;
+}
+
+function releaseMicrophone(): void {
+  const open = microphone;
+  if (!open) {
+    return;
+  }
+  microphone = null;
+  window.clearInterval(open.sampler);
+  window.clearTimeout(open.idleTimer);
+  open.stream.getTracks().forEach(track => track.stop());
+  void open.audioContext.close();
+}
+
+function sampleMicrophone(open: Microphone): void {
+  if (microphone !== open) {
+    return;
+  }
+  const now = Date.now();
+  const level = audioLevel(open.analyser, open.samples);
+  open.history.push({ at: now, level });
+  while (open.history.length > 0 && now - open.history[0].at > LISTEN_NOISE_WINDOW_MS) {
+    open.history.shift();
+  }
+  const session = listenSession;
+  if (!session?.detector || session.microphone !== open) {
+    return;
+  }
+  switch (session.detector.feed(level, now)) {
+    case 'speech-started':
+      emitListenEvent(session.requestId, { type: 'speech-started' });
+      break;
+    case 'no-speech':
+      session.outcome = 'no speech';
+      stopListening(true);
+      emitListenEvent(session.requestId, { type: 'no-speech' });
+      break;
+    case 'speech-ended':
+      session.outcome = 'speech ended';
+      stopListening(false);
+      break;
+  }
+}
+
 async function startListening(requestId: string, accessToken: string | undefined, micDeviceId: string | undefined): Promise<void> {
   stopListening(true);
 
-  let stream: MediaStream;
+  const startedAt = Date.now();
+  let open: Microphone;
   try {
-    stream = await getMicrophoneStream(micDeviceId, { echoCancellation: true, noiseSuppression: true });
+    open = await acquireMicrophone(micDeviceId);
   } catch (error) {
     const name = error instanceof DOMException ? error.name : '';
     emitListenEvent(requestId, {
@@ -68,16 +228,11 @@ async function startListening(requestId: string, accessToken: string | undefined
     return;
   }
 
-  const audioContext = new AudioContext();
-  await audioContext.resume().catch(() => undefined);
-  const analyser = audioContext.createAnalyser();
-  analyser.fftSize = 2048;
-  audioContext.createMediaStreamSource(stream).connect(analyser);
-  const samples = new Float32Array(analyser.fftSize);
-
   const mimeType = pickRecordingMimeType();
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  const session: ListenSession = { requestId, stream, audioContext, recorder, chunks: [], discard: false, accessToken };
+  const recorder = new MediaRecorder(open.stream, mimeType ? { mimeType } : undefined);
+  const session: ListenSession = {
+    requestId, microphone: open, recorder, chunks: [], startedAt: Date.now(), micReadyMs: Date.now() - startedAt, discard: false, accessToken
+  };
   listenSession = session;
 
   recorder.addEventListener('dataavailable', (event) => {
@@ -89,62 +244,15 @@ async function startListening(requestId: string, accessToken: string | undefined
   recorder.start(250);
   emitListenEvent(requestId, { type: 'listening', noSpeechTimeoutMs: LISTEN_NO_SPEECH_TIMEOUT_MS });
 
-  if (audioContext.state !== 'running') {
+  if (open.sampler === undefined) {
     // Without audio analysis there's no way to tell speech from silence:
     // record until the user stops it, or the time limit.
-    console.warn('Lamiss POC: audio analysis unavailable, state =', audioContext.state);
+    console.warn('Lamiss POC: audio analysis unavailable, state =', open.audioContext.state);
     emitListenEvent(requestId, { type: 'speech-started' });
     session.timer = window.setTimeout(() => stopListening(false), LISTEN_MAX_ANSWER_MS);
     return;
   }
-
-  const startedAt = Date.now();
-  let noiseTotal = 0;
-  let noiseSamples = 0;
-  let threshold = LISTEN_MIN_SPEECH_LEVEL;
-  let loudSince = 0;
-  let speechStartedAt = 0;
-  let lastSpeechAt = 0;
-
-  const tick = () => {
-    if (listenSession !== session) {
-      return;
-    }
-    const now = Date.now();
-    const level = audioLevel(analyser, samples);
-
-    if (now - startedAt < LISTEN_CALIBRATION_MS) {
-      noiseTotal += level;
-      noiseSamples += 1;
-      threshold = Math.max(LISTEN_MIN_SPEECH_LEVEL, (noiseTotal / noiseSamples) * 2.5);
-    } else if (!speechStartedAt) {
-      if (level > threshold) {
-        loudSince ||= now;
-        if (now - loudSince >= LISTEN_SPEECH_START_MS) {
-          speechStartedAt = now;
-          lastSpeechAt = now;
-          emitListenEvent(requestId, { type: 'speech-started' });
-        }
-      } else {
-        loudSince = 0;
-        if (now - startedAt >= LISTEN_NO_SPEECH_TIMEOUT_MS) {
-          stopListening(true);
-          emitListenEvent(requestId, { type: 'no-speech' });
-          return;
-        }
-      }
-    } else {
-      if (level > threshold * 0.7) {
-        lastSpeechAt = now;
-      }
-      if (now - lastSpeechAt >= LISTEN_END_SILENCE_MS || now - speechStartedAt >= LISTEN_MAX_ANSWER_MS) {
-        stopListening(false);
-        return;
-      }
-    }
-    session.timer = window.setTimeout(tick, LISTEN_SAMPLE_MS);
-  };
-  tick();
+  session.detector = new SpeechDetector(open.history, session.startedAt);
 }
 
 function stopListening(discard: boolean): void {
@@ -158,8 +266,29 @@ function stopListening(discard: boolean): void {
   if (session.recorder.state !== 'inactive') {
     session.recorder.stop();
   }
-  session.stream.getTracks().forEach(track => track.stop());
-  void session.audioContext.close();
+  logListenAttempt(session, discard);
+  // Kept warm for a retry, then released.
+  const open = session.microphone;
+  window.clearTimeout(open.idleTimer);
+  open.idleTimer = window.setTimeout(() => {
+    if (microphone === open && !listenSession) {
+      releaseMicrophone();
+    }
+  }, LISTEN_MIC_IDLE_MS);
+}
+
+// One line per attempt (Lamiss#87): levels only, never audio or text.
+function logListenAttempt(session: ListenSession, discard: boolean): void {
+  const detector = session.detector;
+  const round = (value: number | undefined) => value === undefined ? 'n/a' : value.toFixed(3);
+  console.log('Lamiss POC: listen attempt =', JSON.stringify({
+    outcome: session.outcome ?? (discard ? 'cancelled' : 'stopped'),
+    micReadyMs: session.micReadyMs,
+    listenedMs: Date.now() - session.startedAt,
+    noiseFloor: round(detector?.floor),
+    threshold: round(detector?.threshold),
+    peak: round(detector?.peak)
+  }));
 }
 
 async function finishListening(session: ListenSession): Promise<void> {
