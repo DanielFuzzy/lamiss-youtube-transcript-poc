@@ -1,5 +1,5 @@
 // The toolbar popup: a home view and one view per settings category
-// (TDR-0002). Each view lives in its own script (home-view.ts, audio-view.ts,
+// (TDR-0002). Each view lives in its own script (home-view.ts, captions-view.ts, audio-view.ts,
 // tutor-view.ts, profile-view.ts) on top of popup-shared.ts; this one, loaded
 // last, wires the navigation and shows the home view.
 
