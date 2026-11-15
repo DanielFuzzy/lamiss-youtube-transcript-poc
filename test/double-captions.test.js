@@ -14,7 +14,7 @@ async function flush(rounds = 20) {
 }
 
 const words = (text, startMs) => text.split(' ').map((word, i) => ({ index: i, text: word, startMs: startMs + i * 300, endMs: startMs + (i + 1) * 300 }));
-const chunk = (chunkIndex, startMs, endMs, source, status, target = []) => ({ chunkIndex, startMs, endMs, source: words(source, startMs), target, status });
+const chunk = (chunkIndex, startMs, endMs, source, status, target = [], groups = []) => ({ chunkIndex, startMs, endMs, source: words(source, startMs), target, groups, status });
 const page = (fromMs, chunks) => ({ ok: true, data: { videoId: 'LeRylkDym54', sourceLanguage: 'en', targetLanguage: 'es', fromMs, toMs: fromMs + 60_000, chunks } });
 
 // --- The worker ---------------------------------------------------------------
@@ -62,6 +62,10 @@ class FakeElement {
       node.parentElement = this;
       this.children.push(node);
     }
+  }
+  replaceChildren(...nodes) {
+    this.children = [];
+    this.append(...nodes);
   }
   remove() {
     if (this.parentElement) {
@@ -149,7 +153,14 @@ function overlayEnv({ enabled = true } = {}) {
         return null;
       }
       const [source, target] = overlay.children;
-      return { source: source.textContent, target: target.hidden ? null : target.textContent, lang: [source.lang, target.lang] };
+      const text = line => line.children.map(span => span.textContent).join('');
+      return { source: text(source), target: target.hidden ? null : text(target), lang: [source.lang, target.lang] };
+    },
+    // Each line's words with their color class, e.g. ['I', 'love:lamiss-c0'].
+    colors() {
+      const [source, target] = document.getElementById('lamiss-double-captions').children;
+      const words = line => line.children.map(span => span.textContent.trim() + (span.className ? `:${span.className}` : ''));
+      return { source: words(source), target: words(target) };
     }
   };
 }
@@ -259,4 +270,51 @@ test('double captions: no native language (422) stops asking for this video; a n
   await retry.at(1000);
   await retry.at(2000);
   assert.equal(retry.requests.length, 1, 'no new request within 15 s of a failure');
+});
+
+test('double captions: words that mean the same thing share a color, from the backend\'s groups', async () => {
+  const page$ = overlayEnv();
+  // Source token indexes 0-3 ("Hola me llamo Daniel"); groups as the backend sends them.
+  page$.answer(page(0, [chunk(0, 0, 3000, 'Hola, me llamo Daniel.', 'READY', ['Hi,', 'my', 'name', 'is', 'Daniel.'], [
+    { sourceIndexes: [0], targetIndexes: [0], colorIndex: 0 },
+    { sourceIndexes: [2], targetIndexes: [2, 3], colorIndex: 1 },
+    { sourceIndexes: [3], targetIndexes: [4], colorIndex: 2 }
+  ])]));
+  page$.env.run('startLamissCaptions("LeRylkDym54")');
+  await flush();
+  await page$.at(500);
+
+  assert.deepEqual(page$.colors(), {
+    source: ['Hola,:lamiss-c0', 'me', 'llamo:lamiss-c1', 'Daniel.:lamiss-c2'],
+    target: ['Hi,:lamiss-c0', 'my', 'name:lamiss-c1', 'is:lamiss-c1', 'Daniel.:lamiss-c2']
+  });
+  assert.deepEqual(page$.lines(), { source: 'Hola, me llamo Daniel.', target: 'Hi, my name is Daniel.', lang: ['en', 'es'] });
+});
+
+test('double captions: a line without groups colors only the words written the same in both, a pending one nothing', async () => {
+  const page$ = overlayEnv();
+  page$.answer(page(0, [
+    chunk(0, 0, 3000, 'Vivo en Madrid desde 2019, en serio', 'READY', ['I', 'have', 'lived', 'in', 'Madrid', 'since', '2019,', 'seriously']),
+    chunk(1, 3000, 6000, 'Hola Daniel', 'PENDING')
+  ]));
+  page$.env.run('startLamissCaptions("LeRylkDym54")');
+  await flush();
+  await page$.at(500);
+
+  // "en" appears twice in the source: not a sure match. "Madrid" and "2019" are.
+  assert.deepEqual(page$.colors(), {
+    source: ['Vivo', 'en', 'Madrid:lamiss-c0', 'desde', '2019,:lamiss-c1', 'en', 'serio'],
+    target: ['I', 'have', 'lived', 'in', 'Madrid:lamiss-c0', 'since', '2019,:lamiss-c1', 'seriously']
+  });
+
+  await page$.at(3500);
+  assert.deepEqual(page$.colors(), { source: ['Hola', 'Daniel'], target: ['…'] });
+});
+
+test('double captions: colors wrap around the six-color palette and ignore indexes outside the line', () => {
+  const { env } = overlayEnv();
+  env.context.sample = chunk(0, 0, 3000, 'a b', 'READY', ['x', 'y'], [
+    { sourceIndexes: [0, 99], targetIndexes: [1, 7, -1], colorIndex: 7 }
+  ]);
+  assert.deepEqual(plain(env.run('lamissCaptionColors(sample)')), { source: [1, null], target: [null, 1] });
 });
