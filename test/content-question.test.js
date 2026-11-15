@@ -470,3 +470,38 @@ test('daily goal: it waits for an open question, and Continue then plays the vid
   pressOnCelebration(page, 'Escape');
   assert.equal(page.video.paused, false);
 });
+
+// A page whose canvas can draw, and whose system asks for reduced motion or not.
+function celebrationPage(reducedMotion) {
+  const page = questionEnv();
+  const { document, window } = page.env.context;
+  const createElement = document.createElement;
+  document.createElement = (tag) => {
+    const element = createElement(tag);
+    if (tag === 'canvas') {
+      const noop = () => undefined;
+      element.getContext = () => ({ scale: noop, clearRect: noop, save: noop, translate: noop, rotate: noop, fillRect: noop, restore: noop });
+    }
+    return element;
+  };
+  window.matchMedia = query => ({ matches: reducedMotion && query === '(prefers-reduced-motion: reduce)' });
+  page.env.context.performance = { now: () => 0 };
+  return page;
+}
+
+test('daily goal: confetti falls, unless the system asks for reduced motion: then only the card and the chime', async () => {
+  const moving = celebrationPage(false);
+  await flush();
+  moving.server({ type: 'DAILY_GOAL_REACHED', practicedMinutes: 20, goalMinutes: 20 });
+  assert.equal(celebrationOpen(moving), true);
+  assert.ok(moving.player.querySelector('lamiss-celebration__confetti'), 'confetti with motion allowed');
+
+  const still = celebrationPage(true);
+  await flush();
+  still.server({ type: 'DAILY_GOAL_REACHED', practicedMinutes: 20, goalMinutes: 20 });
+  assert.equal(celebrationOpen(still), true);
+  assert.equal(still.player.querySelector('lamiss-celebration__confetti'), null, 'no confetti');
+  assert.equal(still.posted.at(-1).type, 'chime');
+  assert.equal(still.video.paused, true);
+  assert.equal(still.player.querySelector('lamiss-celebration__title').textContent, 'Congratulations! 🎉');
+});
