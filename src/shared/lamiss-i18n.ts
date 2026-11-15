@@ -322,6 +322,8 @@ const LAMISS_MESSAGES = {
   'question.stopListening': ["Stop listening", "Dejar de escuchar", "Arrêter l'écoute", "Zuhören beenden", "Parar de ouvir"],
   'question.answerVoice': ["Answer with your voice", "Responder con tu voz", "Répondre à voix haute", "Mit deiner Stimme antworten", "Responder com sua voz"],
   'question.continue': ["Continue", "Continuar", "Continuer", "Weiter", "Continuar"],
+  'celebration.title': ["Congratulations! 🎉", "¡Enhorabuena! 🎉", "Félicitations ! 🎉", "Glückwunsch! 🎉", "Parabéns! 🎉"],
+  'celebration.dailyGoal': ["You reached your daily goal: {minutes} minutes of practice today.", "Has alcanzado tu objetivo diario: {minutes} minutos de práctica hoy.", "Tu as atteint ton objectif du jour : {minutes} minutes de pratique aujourd'hui.", "Du hast dein Tagesziel erreicht: heute {minutes} Minuten Übung.", "Você atingiu sua meta diária: {minutes} minutos de prática hoje."],
   'question.close': ["Close", "Cerrar", "Fermer", "Schließen", "Fechar"],
   'question.checkingShort': ["Checking…", "Revisando…", "Vérification…", "Wird geprüft…", "Verificando…"],
   'question.answer': ["Answer", "Responder", "Répondre", "Antworten", "Responder"],
