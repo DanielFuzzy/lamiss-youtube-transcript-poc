@@ -28,7 +28,14 @@ function closePopup(): void {
 }
 
 if (POPUP_EMBEDDED) {
+  // Translucent over the video (popup.css), and as tall as what it shows, so
+  // the page can keep it right above the gear.
   document.documentElement.dataset.embedded = 'true';
+  const reportMenuHeight = () => window.parent.postMessage(
+    { type: 'lamiss:menu-size', height: Math.ceil(document.documentElement.scrollHeight) }, 'https://www.youtube.com');
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(reportMenuHeight).observe(document.body);
+  }
 }
 let popupCurrentView: PopupViewName = 'home';
 

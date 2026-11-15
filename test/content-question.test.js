@@ -546,11 +546,12 @@ test('menu: the gear opens the toolbar menu in a frame under it, and closes it a
   assert.equal(frame.allow, 'microphone');
   assert.equal(frame.title, 'Lamiss settings');
   assert.equal(page.gear.getAttribute('aria-expanded'), 'true');
-  // Under the gear, its right edge lined up with the gear's, inside the window.
-  assert.equal(frame.style.top, '544px');
+  // Right above the gear (top 500), its right edge lined up with the gear's, before the menu says its height.
+  assert.equal(frame.dataset.placement, 'above');
   assert.equal(frame.style.left, '580px');
   assert.equal(frame.style.width, '360px');
-  assert.equal(frame.style.height, '248px');
+  assert.equal(frame.style.height, '480px');
+  assert.equal(frame.style.top, '12px');
 
   page.gear.listeners.click[0]({ stopPropagation() {} });
   assert.equal(page.frame(), null);
@@ -584,4 +585,30 @@ test('menu: only its own frame may close it', async () => {
   assert.ok(page.frame());
   page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:close-menu' } });
   assert.equal(page.frame(), null);
+});
+
+test('menu: it is as tall as the menu says and stays right above the gear; with no room above, it opens below', async () => {
+  const page = menuPage();
+  await flush();
+  page.env.run('openLamissMenu()');
+  const frame = page.frame();
+  frame.contentWindow = {};
+
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:menu-size', height: 300 } });
+  assert.equal(frame.style.height, '300px');
+  assert.equal(frame.style.top, '192px', '500 - 8 - 300');
+  // Never taller than 600 px, nor than the room above the gear.
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:menu-size', height: 2000 } });
+  assert.equal(frame.style.height, '484px');
+  assert.equal(frame.style.top, '8px');
+  // Another frame can't resize it.
+  page.fire('window', 'message', { source: {}, data: { type: 'lamiss:menu-size', height: 250 } });
+  assert.equal(frame.style.height, '484px');
+
+  // Scrolled so the gear is near the top of the window: below it.
+  page.gear.getBoundingClientRect = () => ({ left: 900, right: 940, top: 60, bottom: 96 });
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:menu-size', height: 300 } });
+  assert.equal(frame.dataset.placement, 'below');
+  assert.equal(frame.style.top, '104px');
+  assert.equal(frame.style.height, '300px');
 });

@@ -196,6 +196,22 @@ test('menu under the video: it asks the page to close it, where the toolbar popu
   assert.deepEqual(plain(messages), [{ message: { type: 'lamiss:close-menu' }, origin: 'https://www.youtube.com' }]);
   assert.equal(embedded.env.run('document.documentElement.dataset.embedded'), 'true');
 
+  // It tells the page how tall it is, whenever that changes.
+  let observed;
+  class FakeResizeObserver {
+    constructor(callback) { this.callback = callback; }
+    observe(target) { observed = { target, callback: this.callback }; }
+  }
+  const sizedMessages = [];
+  const sized = recentViewEnv(undefined, {
+    location: { search: '?embedded=1' },
+    window: { parent: { postMessage: (message, origin) => sizedMessages.push({ message, origin }) } },
+    ResizeObserver: FakeResizeObserver
+  });
+  sized.env.run('document.documentElement.scrollHeight = 412.4');
+  observed.callback();
+  assert.deepEqual(plain(sizedMessages), [{ message: { type: 'lamiss:menu-size', height: 413 }, origin: 'https://www.youtube.com' }]);
+
   let closed = false;
   const toolbarWindow = { close: () => { closed = true; } };
   toolbarWindow.parent = toolbarWindow;

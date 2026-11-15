@@ -1418,3 +1418,23 @@ html[data-lamiss-i18n='pending'] body {
 .preferences-card .field-hint {
   margin-top: 4px;
 }
+
+/* --- Under the video (the gear on the YouTube page) ---------------------------
+   The same menu over the video: translucent backgrounds, so the video still
+   shows through; the frame on the page blurs it (lamiss-button.css). */
+html[data-embedded='true'] {
+  --bg: rgba(251, 249, 255, 0.66);
+  --surface: rgba(255, 255, 255, 0.7);
+  --accent-soft: rgba(242, 236, 255, 0.72);
+  --accent-softer: rgba(248, 245, 255, 0.6);
+  --border: rgba(221, 211, 247, 0.7);
+  background: transparent;
+}
+
+html[data-embedded='true'] .view {
+  background: radial-gradient(120% 220px at 50% -60px, rgba(239, 230, 255, 0.55) 0%, rgba(239, 230, 255, 0) 100%);
+}
+
+html[data-embedded='true'] .view-header {
+  background: rgba(251, 249, 255, 0.55);
+}
