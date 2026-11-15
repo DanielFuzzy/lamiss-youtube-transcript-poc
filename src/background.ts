@@ -720,7 +720,9 @@ type LamissLiveWorkerMessage =
   | { type: 'ask-result'; requestId: string; ok: true; answer: string; language: string | null }
   | { type: 'ask-result'; requestId: string; ok: false; error: string; retryable: boolean }
   | { type: 'listen-event'; requestId: string; event: LamissListenEvent }
-  | { type: 'speech-event'; requestId: string; event: LamissSpeechEvent };
+  | { type: 'speech-event'; requestId: string; event: LamissSpeechEvent }
+  // Whether the offscreen page is listening for the wake word (Lamiss#85).
+  | { type: 'wake-state'; listening: boolean; phrase?: string };
 
 // Lamiss's voice, played by the offscreen document.
 type LamissSpeechEvent = { type: 'started' } | { type: 'ended' } | { type: 'failed'; error: string };
@@ -1053,6 +1055,7 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
         live.videoId = message.videoId;
         postLive(live, { type: 'status', state: 'connecting' });
         void connectLive(live);
+        void updateWakeListening();
       }
       break;
     case 'position':
@@ -1162,7 +1165,82 @@ chrome.runtime.onConnect.addListener((port) => {
     live.closed = true;
     clearTimeout(live.retryTimer);
     live.socket?.close(1000, 'Tab left the video');
+    void updateWakeListening();
   });
+  postLive(live, { type: 'wake-state', listening: wakeListening, ...(wakePhrase ? { phrase: wakePhrase } : {}) });
+});
+
+// ---------------------------------------------------------------------------
+// "Hey Lamiss" (Lamiss#85). While the switch is on and a Lamiss session runs
+// in some tab, the offscreen page listens for the wake word on this computer.
+// A detection opens the Ask Lamiss card on the active tab, if Lamiss runs there.
+// ---------------------------------------------------------------------------
+
+let wakeListening = false;
+let wakePhrase: string | undefined;
+// Serializes updates: settings and tabs change concurrently.
+let wakeUpdate: Promise<void> = Promise.resolve();
+
+function updateWakeListening(): Promise<void> {
+  wakeUpdate = wakeUpdate.then(async () => {
+    // Read here each time: a stored value can't be overtaken by an older read.
+    const wanted = (await readWakeWordSettings()).enabled && [...liveConnections].some(live => !live.closed && live.videoId);
+    if (wanted === wakeListening) {
+      return;
+    }
+    if (wanted) {
+      const [config, devices] = await Promise.all([readWakeWordConfig(), readDeviceSettings()]);
+      if (!config) {
+        return;
+      }
+      wakePhrase = config.phrase;
+      await ensureOffscreenRecorder();
+      await chrome.runtime.sendMessage({
+        target: 'lamiss-offscreen', type: 'wake-start', ...(devices.micDeviceId ? { micDeviceId: devices.micDeviceId } : {})
+      });
+    } else {
+      await chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'wake-stop' }).catch(() => undefined);
+    }
+    setWakeListening(wanted);
+  }).catch((error: unknown) => console.warn('Lamiss POC: could not update wake word listening:', error));
+  return wakeUpdate;
+}
+
+function setWakeListening(listening: boolean): void {
+  wakeListening = listening;
+  for (const live of liveConnections) {
+    postLive(live, { type: 'wake-state', listening, ...(wakePhrase ? { phrase: wakePhrase } : {}) });
+  }
+}
+
+void updateWakeListening();
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[LAMISS_WAKE_WORD_SETTINGS_KEY]) {
+    void updateWakeListening();
+  }
+});
+
+addLamissMessageListener((message: { source?: string; wake?: { type: string; error?: string; micDenied?: boolean } }) => {
+  if (message?.source !== 'lamiss-offscreen' || !message.wake) {
+    return false;
+  }
+  if (message.wake.type === 'detected') {
+    void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      const live = [...liveConnections].find(connection => connection.videoId && connection.port.sender?.tab?.id === tab?.id);
+      if (tab?.id !== undefined && live) {
+        void chrome.tabs.sendMessage(tab.id, { type: LAMISS_OPEN_ASK_MESSAGE }).catch(() => undefined);
+      }
+    });
+  } else if (message.wake.type === 'failed') {
+    console.warn('Lamiss POC: wake word listening failed:', message.wake.error);
+    if (message.wake.micDenied) {
+      void chrome.tabs.create({ url: chrome.runtime.getURL('permission/permission.html') });
+    }
+    // Off until the switch or the sessions change again.
+    wakeUpdate = wakeUpdate.then(() => setWakeListening(false));
+  }
+  return false;
 });
 
 // ---------------------------------------------------------------------------

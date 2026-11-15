@@ -13,6 +13,10 @@ const path = require('path');
 const ALLOWED_PERMISSIONS = ['scripting', 'webRequest', 'storage', 'offscreen', 'identity'];
 const YOUTUBE_HOST_PERMISSION = 'https://www.youtube.com/*';
 const ALLOWED_EXTENSIONS = new Set(['.js', '.html', '.css', '.json', '.png', '.svg']);
+// "Hey Lamiss" (Lamiss#85): only with a wake word model (wakeword/model.json).
+const WAKE_WORD_EXTENSIONS = new Set(['.mjs', '.wasm', '.onnx']);
+// Loaded at runtime by the offscreen page, not by a <script> tag.
+const WAKE_WORD_SCRIPTS = ['offscreen/wake-worklet.js', 'vendor/onnxruntime/ort.wasm.min.js'];
 const ICON_SIZES = ['16', '32', '48', '128'];
 const LOCAL_ADDRESS = /\b(localhost|127\.0\.0\.1|0\.0\.0\.0)\b|\[::1\]/;
 
@@ -160,6 +164,14 @@ function validatePackage(dir, { environment, expectedVersion } = {}) {
 
   // Scripts and styles the pages load.
   const files = listFiles(dir);
+  // A wake word model only ships if it may: never openWakeWord's
+  // non-commercial development model outside development builds.
+  const wakeWord = files.includes('wakeword/model.json')
+    ? JSON.parse(fs.readFileSync(path.join(dir, 'wakeword/model.json'), 'utf8'))
+    : undefined;
+  if (wakeWord?.developmentOnly && environment !== 'development') {
+    problem(`wake word model "${wakeWord.phrase}" is for development only (its license forbids release)`);
+  }
   for (const page of files.filter(file => file.endsWith('.html'))) {
     const html = fs.readFileSync(path.join(dir, page), 'utf8');
     for (const match of html.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="([^"]+)"/g)) {
@@ -198,8 +210,10 @@ function validatePackage(dir, { environment, expectedVersion } = {}) {
   }
 
   // Content Security Policy: Chrome's default, or nothing looser.
+  // With a wake word, 'wasm-unsafe-eval' too: onnxruntime-web compiles WebAssembly.
   const csp = manifest.content_security_policy?.extension_pages ?? '';
-  if (/unsafe-eval|unsafe-inline|https?:|\bdata:|\*/.test(csp)) {
+  const cspWithoutWasm = wakeWord ? csp.replace(/'wasm-unsafe-eval'/g, '') : csp;
+  if (/unsafe-eval|unsafe-inline|https?:|\bdata:|\*/.test(cspWithoutWasm)) {
     problem(`content_security_policy.extension_pages allows remote or inline code: ${csp}`);
   }
 
@@ -227,12 +241,15 @@ function validatePackage(dir, { environment, expectedVersion } = {}) {
 
   // Only what the extension needs, and no development leftovers.
   const scripts = referencedScripts(dir, manifest);
+  if (wakeWord) {
+    WAKE_WORD_SCRIPTS.forEach(file => scripts.add(file));
+  }
   for (const file of files) {
     if (file.endsWith('.js') && !scripts.has(file)) {
       problem(`script nothing loads (test-only or dead code): ${file}`);
     }
     const extension = path.posix.extname(file);
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
+    if (!ALLOWED_EXTENSIONS.has(extension) && !(wakeWord && WAKE_WORD_EXTENSIONS.has(extension))) {
       problem(`unexpected file in the package: ${file}`);
     }
     if (/(^|\/)\.|\.map$|\.ts$|(^|\/)node_modules\//.test(file)) {

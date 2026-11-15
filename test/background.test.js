@@ -689,3 +689,62 @@ test('ask lamiss: the Alt+L shortcut opens the card on the active YouTube tab on
   await flush();
   assert.deepEqual(elsewhere.tabsSent, []);
 });
+
+// --- "Hey Lamiss" (Lamiss#85) -------------------------------------------------
+
+function wakeEnv(options = {}) {
+  const env = backgroundEnv({
+    tabs: options.tabs,
+    extra: askBackend(async (url) => url.endsWith('/wakeword/model.json')
+      ? { json: { phrase: 'Hey Jarvis', model: 'wake-word.onnx', threshold: 0.5, developmentOnly: true } }
+      : undefined)
+  });
+  signIn(env);
+  const setEnabled = async (enabled) => {
+    env.local.data.set('lamissWakeWordSettings', { enabled });
+    for (const listener of env.chrome.storage.onChanged.listeners) {
+      listener({ lamissWakeWordSettings: { newValue: { enabled } } }, 'local');
+    }
+    await flush();
+  };
+  const wakeCommands = () => env.runtimeSent.filter(message => message.target === 'lamiss-offscreen' && message.type?.startsWith('wake-')).map(message => message.type);
+  return { env, setEnabled, wakeCommands };
+}
+
+test('hey lamiss: listens only while the switch is on and a session runs, and says so to the tabs', async () => {
+  const { env, setEnabled, wakeCommands } = wakeEnv();
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  await setEnabled(true);
+  assert.deepEqual(wakeCommands(), [], 'no session yet');
+
+  port.send({ type: 'start', videoId: 'vid' });
+  await flush();
+  assert.deepEqual(wakeCommands(), ['wake-start']);
+  assert.deepEqual(port.messages.filter(message => message.type === 'wake-state').at(-1), { type: 'wake-state', listening: true, phrase: 'Hey Jarvis' });
+
+  await setEnabled(false);
+  assert.deepEqual(wakeCommands(), ['wake-start', 'wake-stop']);
+  assert.deepEqual(port.messages.filter(message => message.type === 'wake-state').at(-1), { type: 'wake-state', listening: false, phrase: 'Hey Jarvis' });
+});
+
+test('hey lamiss: a detection opens the card on the active tab, only if Lamiss runs there', async () => {
+  const { env, setEnabled } = wakeEnv({ tabs: [{ id: 7, url: 'https://www.youtube.com/watch?v=LeRylkDym54' }] });
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'start', videoId: 'vid' });
+  await setEnabled(true);
+
+  await env.dispatchMessage({ source: 'lamiss-offscreen', wake: { type: 'detected' } }, { id: env.chrome.runtime.id, url: `chrome-extension://${env.chrome.runtime.id}/offscreen/offscreen.html` });
+  await flush();
+  assert.deepEqual(env.tabsSent, [{ tabId: 7, message: { type: 'lamiss:open-ask' } }]);
+
+  const other = wakeEnv({ tabs: [{ id: 9, url: 'https://www.youtube.com/watch?v=other' }] });
+  const otherPort = fakePort();
+  other.env.onConnect.listeners[0](otherPort);
+  otherPort.send({ type: 'start', videoId: 'vid' });
+  await other.setEnabled(true);
+  await other.env.dispatchMessage({ source: 'lamiss-offscreen', wake: { type: 'detected' } }, { id: other.env.chrome.runtime.id, url: `chrome-extension://${other.env.chrome.runtime.id}/offscreen/offscreen.html` });
+  await flush();
+  assert.deepEqual(other.env.tabsSent, [], 'the active tab has no Lamiss session');
+});

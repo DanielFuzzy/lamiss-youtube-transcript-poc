@@ -249,6 +249,19 @@
           <input id="volumeInput" class="slider" type="range" min="0" max="100" step="5" value="100" />
         </div>
       </section>
+
+      <!-- "Hey Lamiss" (Lamiss#85): only in builds that include a wake word model. -->
+      <div id="wakeWordRow" class="toggle-row" hidden>
+        <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" /><path d="M12 17v5" /></svg>
+        <div class="toggle-text">
+          <label id="wakeWordLabel" class="setting-label" for="wakeWordInput">Listen for “Hey Lamiss”</label>
+          <p id="wakeWordHint" class="field-hint"></p>
+        </div>
+        <label class="switch">
+          <input id="wakeWordInput" type="checkbox" aria-describedby="wakeWordHint" />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
     </div>
   </section>
 
