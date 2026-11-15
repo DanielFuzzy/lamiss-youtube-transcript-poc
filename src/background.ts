@@ -684,7 +684,9 @@ type LamissServerMessage =
   | { type: 'ERROR'; message: string }
   // When the next question will come if the video keeps playing; atVideoMs
   // is null when none is coming.
-  | { type: 'NEXT_QUESTION'; atVideoMs: number | null; waitingForAnswer: boolean };
+  | { type: 'NEXT_QUESTION'; atVideoMs: number | null; waitingForAnswer: boolean }
+  // Today's practice just reached the daily goal (Lamiss#98); sent once a day.
+  | { type: 'DAILY_GOAL_REACHED'; practicedMinutes: number; goalMinutes: number };
 
 type LamissLiveClientMessage =
   | { type: 'start'; videoId: string }
@@ -698,6 +700,8 @@ type LamissLiveClientMessage =
   | { type: 'stop-listening'; requestId: string; discard: boolean }
   | { type: 'speak'; requestId: string; text: string; language?: string }
   | { type: 'stop-speaking'; requestId: string }
+  // The soft chime of the daily goal celebration (Lamiss#98).
+  | { type: 'chime' }
   | { type: 'keepalive' };
 
 // Progress of a spoken answer, reported by the offscreen recorder.
@@ -899,6 +903,8 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
     live.attempt = 0;
     live.pauseRequested = false;
     void sendQuestionSettings(socket);
+    // The daily goal is counted in the learner's own day (Lamiss#98).
+    socket.send(JSON.stringify({ type: 'CLIENT_INFO', timeZone: lamissLocalTimeZone() }));
     postLive(live, { type: 'status', state: 'connected' });
     if (live.connectedBefore) {
       postLiveLog(live, { type: 'resync' });
@@ -1139,6 +1145,19 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
             event: { type: 'failed', error: error instanceof Error ? error.message : String(error) }
           });
         });
+      break;
+    case 'chime':
+      void readDeviceSettings()
+        .then(async (devices) => {
+          await ensureOffscreenRecorder();
+          await chrome.runtime.sendMessage({
+            target: 'lamiss-offscreen',
+            type: 'chime',
+            ...(devices.speakerDeviceId ? { speakerDeviceId: devices.speakerDeviceId } : {}),
+            volume: devices.volume
+          });
+        })
+        .catch((error: unknown) => console.warn('Lamiss POC: could not play the chime:', error));
       break;
     case 'keepalive':
       // Receiving it is enough: it resets the worker's idle timer.

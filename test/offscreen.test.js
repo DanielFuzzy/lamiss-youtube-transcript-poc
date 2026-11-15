@@ -171,3 +171,56 @@ test('speak without device settings keeps the default speaker and full volume', 
   assert.deepEqual(played[0].sinks, []);
   assert.equal(played[0].volume, 1);
 });
+
+// A Web Audio stand-in that records the chime's master volume and its speaker.
+function chimeEnv(contexts) {
+  class FakeParam {
+    constructor() { this.value = 0; }
+    setValueAtTime() {}
+    exponentialRampToValueAtTime() {}
+  }
+  class FakeNode {
+    constructor() { this.gain = new FakeParam(); this.frequency = new FakeParam(); }
+    connect(node) { return node; }
+    start() {}
+    stop() {}
+  }
+  class FakeAudioContext {
+    constructor() {
+      this.currentTime = 0;
+      this.destination = {};
+      this.sinks = [];
+      this.gains = [];
+      this.oscillators = 0;
+      this.closed = false;
+      contexts.push(this);
+    }
+    async setSinkId(id) { this.sinks.push(id); }
+    async resume() {}
+    async close() { this.closed = true; }
+    createGain() { const node = new FakeNode(); this.gains.push(node); return node; }
+    createOscillator() { this.oscillators += 1; return new FakeNode(); }
+  }
+  return createExtensionEnv({
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'offscreen/offscreen.js'],
+    withoutSessionStorage: true,
+    globals: { AudioContext: FakeAudioContext }
+  });
+}
+
+test('the daily goal chime plays softly on the chosen speaker, and only for the worker', async () => {
+  const contexts = [];
+  const env = chimeEnv(contexts);
+  const chime = { target: 'lamiss-offscreen', type: 'chime', speakerDeviceId: 'speaker-3', volume: 0.5 };
+  await env.dispatchMessage(chime, senders.contentScript);
+  assert.equal(contexts.length, 0);
+
+  await env.dispatchMessage(chime, worker);
+  await flush();
+  assert.equal(contexts.length, 1);
+  assert.deepEqual(contexts[0].sinks, ['speaker-3']);
+  // The first gain is the master: 30% of the voice volume.
+  assert.ok(Math.abs(contexts[0].gains[0].gain.value - 0.15) < 1e-9);
+  assert.ok(contexts[0].oscillators > 0);
+  assert.equal(env.fetchCalls.length, 0);
+});
