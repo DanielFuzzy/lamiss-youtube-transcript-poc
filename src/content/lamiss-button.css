@@ -740,3 +740,18 @@
 .lamiss-celebration__card .lamiss-question__actions {
   justify-content: center;
 }
+
+/* The extension's menu under the video: the toolbar popup in a frame, under the gear. */
+.lamiss-menu-button[aria-expanded="true"] {
+  background: #4c2391;
+}
+
+.lamiss-menu-frame {
+  position: fixed;
+  z-index: 3000;
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  border-radius: 14px;
+  background: #fbf9ff;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  color-scheme: light;
+}

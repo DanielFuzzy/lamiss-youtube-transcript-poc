@@ -12,6 +12,24 @@ type PopupViewHooks = {
 };
 
 const popupViewHooks: Partial<Record<PopupViewName, PopupViewHooks>> = {};
+
+// Opened from the gear under the video (a frame on the YouTube page) rather
+// than the toolbar. There window.close() does nothing: the page closes it.
+const POPUP_EMBEDDED = typeof location !== 'undefined'
+  && new URLSearchParams(location.search).get('embedded') === '1' && window.parent !== window;
+
+function closePopup(): void {
+  if (POPUP_EMBEDDED) {
+    // The content script only accepts this from its own frame.
+    window.parent.postMessage({ type: 'lamiss:close-menu' }, 'https://www.youtube.com');
+  } else {
+    window.close();
+  }
+}
+
+if (POPUP_EMBEDDED) {
+  document.documentElement.dataset.embedded = 'true';
+}
 let popupCurrentView: PopupViewName = 'home';
 
 function popupElement<T extends HTMLElement>(id: string): T {

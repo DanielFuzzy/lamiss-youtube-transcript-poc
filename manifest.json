@@ -44,6 +44,7 @@
     {
       "resources": [
         "chat/chat.html",
+        "popup/popup.html",
         "brand/lamiss-mark-small.svg"
       ],
       "matches": [
