@@ -740,3 +740,22 @@
 .lamiss-celebration__card .lamiss-question__actions {
   justify-content: center;
 }
+
+/* The extension's menu under the video: the toolbar popup in a frame right
+   above the gear, over the video. Its page is translucent (popup.css); the
+   frame blurs the video behind it, so the video still shows through. */
+.lamiss-menu-button[aria-expanded="true"] {
+  background: #4c2391;
+}
+
+.lamiss-menu-frame {
+  position: fixed;
+  z-index: 3000;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 14px;
+  background: transparent;
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  /* The same as the page inside: a different scheme would make Chrome paint the frame opaque. */
+  color-scheme: light;
+}

@@ -553,6 +553,7 @@ function ensureLamissButton(): void {
   renderLamissButton(button);
   ensureLamissTimer(button);
   ensureLamissAskButton(button);
+  ensureLamissMenuButton(button);
 }
 
 // The chat is an extension page in an iframe at the top of the right-hand
@@ -2136,6 +2137,147 @@ function ensureLamissAskButton(button: HTMLButtonElement): void {
   ask.classList.toggle('lamiss-ask-button--listening', listening);
 }
 
+// --- The extension's menu under the video ---------------------------------------
+// The same menu as the toolbar icon (popup.html), opened from a gear after the
+// Ask button, in a translucent frame right above it, over the video (below it
+// only when there is no room above). It closes on a click elsewhere on
+// the page, on Escape, on the gear again, or when the menu asks (after
+// starting Lamiss or opening a video, as the toolbar popup closes itself).
+
+const LAMISS_MENU_BUTTON_ID = 'lamiss-menu-button';
+const LAMISS_MENU_FRAME_ID = 'lamiss-menu-frame';
+const LAMISS_MENU_WIDTH_PX = 360;
+const LAMISS_MENU_MAX_HEIGHT_PX = 600;
+// Until the menu says how tall it is (lamiss:menu-size).
+const LAMISS_MENU_INITIAL_HEIGHT_PX = 480;
+const LAMISS_MENU_MIN_HEIGHT_PX = 200;
+let lamissMenuContentHeight = LAMISS_MENU_INITIAL_HEIGHT_PX;
+const LAMISS_GEAR_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>';
+
+function ensureLamissMenuButton(button: HTMLButtonElement): void {
+  const existing = document.getElementById(LAMISS_MENU_BUTTON_ID) as HTMLButtonElement | null;
+  if (!lamissLiveVideoId || lamissLiveVideoId !== lamissButtonVideoId) {
+    existing?.remove();
+    closeLamissMenu(false);
+    return;
+  }
+  const gear = existing ?? createLamissMenuButton();
+  const after = document.getElementById(LAMISS_ASK_BUTTON_ID) ?? document.getElementById(LAMISS_TIMER_ID) ?? button;
+  if (gear.previousElementSibling !== after) {
+    after.after(gear);
+  }
+  gear.title = lamissT('page.menu');
+  gear.setAttribute('aria-label', lamissT('page.menu'));
+}
+
+function createLamissMenuButton(): HTMLButtonElement {
+  const gear = document.createElement('button');
+  gear.id = LAMISS_MENU_BUTTON_ID;
+  gear.type = 'button';
+  gear.className = 'lamiss-ask-button lamiss-menu-button';
+  gear.setAttribute('aria-haspopup', 'dialog');
+  gear.setAttribute('aria-expanded', 'false');
+  // Static markup with no user data.
+  gear.innerHTML = LAMISS_GEAR_ICON;
+  gear.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (document.getElementById(LAMISS_MENU_FRAME_ID)) {
+      closeLamissMenu(true);
+    } else {
+      openLamissMenu();
+    }
+  });
+  return gear;
+}
+
+function openLamissMenu(): void {
+  const gear = document.getElementById(LAMISS_MENU_BUTTON_ID);
+  if (!gear || document.getElementById(LAMISS_MENU_FRAME_ID)) {
+    return;
+  }
+  closeLamissSettingsPopover();
+  lamissMenuContentHeight = LAMISS_MENU_INITIAL_HEIGHT_PX;
+  const frame = document.createElement('iframe');
+  frame.id = LAMISS_MENU_FRAME_ID;
+  frame.className = 'lamiss-menu-frame';
+  frame.title = lamissT('page.menu');
+  // The microphone test in the audio settings.
+  frame.allow = 'microphone';
+  frame.src = chrome.runtime.getURL('popup/popup.html?embedded=1');
+  document.body.append(frame);
+  gear.setAttribute('aria-expanded', 'true');
+  positionLamissMenu();
+  frame.focus();
+}
+
+function closeLamissMenu(refocus: boolean): void {
+  const frame = document.getElementById(LAMISS_MENU_FRAME_ID);
+  if (!frame) {
+    return;
+  }
+  frame.remove();
+  const gear = document.getElementById(LAMISS_MENU_BUTTON_ID);
+  gear?.setAttribute('aria-expanded', 'false');
+  if (refocus) {
+    gear?.focus();
+  }
+}
+
+// Right above the gear, its right edge lined up with the gear's, as tall as
+// the menu's content (at most 600 px). Below the gear only when the space
+// above is too short; it scrolls inside when the window is.
+function positionLamissMenu(): void {
+  const frame = document.getElementById(LAMISS_MENU_FRAME_ID);
+  const gear = document.getElementById(LAMISS_MENU_BUTTON_ID);
+  if (!frame || !gear) {
+    return;
+  }
+  const anchor = gear.getBoundingClientRect();
+  const width = Math.min(LAMISS_MENU_WIDTH_PX, window.innerWidth - 16);
+  const left = Math.min(Math.max(8, anchor.right - width), window.innerWidth - width - 8);
+  const wanted = Math.min(lamissMenuContentHeight, LAMISS_MENU_MAX_HEIGHT_PX);
+  const above = anchor.top - 16;
+  const below = window.innerHeight - anchor.bottom - 16;
+  const placeAbove = above >= Math.min(wanted, LAMISS_MENU_MIN_HEIGHT_PX) || above >= below;
+  const height = Math.max(Math.min(LAMISS_MENU_MIN_HEIGHT_PX, wanted), Math.min(wanted, placeAbove ? above : below));
+  frame.style.width = `${width}px`;
+  frame.style.left = `${left}px`;
+  frame.style.height = `${height}px`;
+  frame.style.top = `${placeAbove ? anchor.top - 8 - height : anchor.bottom + 8}px`;
+  frame.dataset.placement = placeAbove ? 'above' : 'below';
+}
+
+// Clicks inside the menu stay in its frame: any click the page sees is elsewhere.
+document.addEventListener('pointerdown', (event) => {
+  const gear = document.getElementById(LAMISS_MENU_BUTTON_ID);
+  if (document.getElementById(LAMISS_MENU_FRAME_ID) && !gear?.contains(event.target as Node | null)) {
+    closeLamissMenu(false);
+  }
+}, true);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.getElementById(LAMISS_MENU_FRAME_ID)) {
+    closeLamissMenu(true);
+  }
+}, true);
+window.addEventListener('scroll', positionLamissMenu, { passive: true });
+window.addEventListener('resize', positionLamissMenu);
+
+// Only the menu's own frame may close it or say how tall it is.
+window.addEventListener('message', (event) => {
+  const frame = document.getElementById(LAMISS_MENU_FRAME_ID) as HTMLIFrameElement | null;
+  if (!frame || event.source !== frame.contentWindow) {
+    return;
+  }
+  const data = event.data as { type?: unknown; height?: unknown } | null;
+  if (data?.type === 'lamiss:close-menu') {
+    closeLamissMenu(true);
+  } else if (data?.type === 'lamiss:menu-size' && typeof data.height === 'number' && Number.isFinite(data.height)
+      && data.height > 0) {
+    lamissMenuContentHeight = data.height;
+    positionLamissMenu();
+  }
+});
+
 function createLamissAskButton(): HTMLButtonElement {
   const ask = document.createElement('button');
   ask.id = LAMISS_ASK_BUTTON_ID;
@@ -2451,6 +2593,15 @@ function renderLamissLanguage(): void {
   const frame = document.getElementById(LAMISS_CHAT_FRAME_ID) as HTMLIFrameElement | null;
   if (frame) {
     frame.title = lamissT('page.chatFrame');
+  }
+  const menu = document.getElementById(LAMISS_MENU_FRAME_ID) as HTMLIFrameElement | null;
+  if (menu) {
+    menu.title = lamissT('page.menu');
+  }
+  const gear = document.getElementById(LAMISS_MENU_BUTTON_ID);
+  if (gear) {
+    gear.title = lamissT('page.menu');
+    gear.setAttribute('aria-label', lamissT('page.menu'));
   }
   const timer = document.getElementById(LAMISS_TIMER_ID);
   if (timer) {

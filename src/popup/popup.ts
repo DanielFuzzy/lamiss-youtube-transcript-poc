@@ -18,10 +18,14 @@ for (const back of document.querySelectorAll<HTMLButtonElement>('[data-back]')) 
 }
 
 document.addEventListener('keydown', (event) => {
-  // Escape goes back first; on the home view Chrome closes the popup.
+  // Escape goes back first; on the home view Chrome closes the popup (or,
+  // under the video, the page closes the menu).
   if (event.key === 'Escape' && popupCurrentView !== 'home') {
     event.preventDefault();
     showPopupView('home');
+  } else if (event.key === 'Escape' && POPUP_EMBEDDED) {
+    event.preventDefault();
+    closePopup();
   }
 });
 

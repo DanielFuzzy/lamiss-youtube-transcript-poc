@@ -177,7 +177,7 @@ homeStartButton.addEventListener('click', async () => {
     await chrome.tabs.sendMessage(homeTabId, { type: LAMISS_START_LEARNING_MESSAGE });
     setHomeStatus('busy', lamissT(homePageState === 'ready' ? 'home.statusOpeningChat' : 'home.statusJoining'));
     // The video page shows the progress and the chat from here on.
-    window.setTimeout(() => window.close(), 700);
+    window.setTimeout(closePopup, 700);
   } catch {
     setHomeStatus('attention', lamissT('home.statusReloadTab'));
     renderHomeStart();

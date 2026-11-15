@@ -139,7 +139,7 @@ function recentItem(video: LamissRecentVideo): HTMLLIElement {
 async function openRecentVideo(url: string): Promise<void> {
   try {
     await chrome.tabs.create({ url });
-    window.close();
+    closePopup();
   } catch (error) {
     console.error('Lamiss POC: could not open the video:', error);
     recentMessage.textContent = lamissT('recent.cantOpen');

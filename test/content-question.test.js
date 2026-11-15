@@ -29,7 +29,11 @@ class FakeElement {
     this.hidden = false;
     this.textContent = '';
     this.value = '';
+    this.style = {};
     this.classList = { contains: () => false };
+  }
+  getBoundingClientRect() {
+    return { left: 900, right: 940, top: 500, bottom: 536 };
   }
   append(...nodes) {
     for (const node of nodes) {
@@ -94,20 +98,27 @@ function questionEnv() {
   const video = new FakeVideo();
   player.append(video);
   const timeouts = [];
+  const body = new FakeElement('body');
+  const windowListeners = {};
   const document = {
     documentElement: {},
+    body,
     addEventListener(type, listener) {
       (documentListeners[type] ??= []).push(listener);
     },
     removeEventListener() {},
     createElement: tag => new FakeElement(tag),
-    getElementById: id => (id === player.id ? player : [...player.descendants()].find(node => node.id === id) ?? null),
+    getElementById: id => (id === player.id ? player : [...player.descendants(), ...body.descendants()].find(node => node.id === id) ?? null),
     querySelector: selector => (selector === '#movie_player video' ? video : null),
     querySelectorAll: () => []
   };
   const window = {
-    addEventListener() {},
+    addEventListener(type, listener) {
+      (windowListeners[type] ??= []).push(listener);
+    },
     removeEventListener() {},
+    innerWidth: 1280,
+    innerHeight: 800,
     location: { href: WATCH_URL },
     // Timeouts run only when a test asks; intervals never do.
     setTimeout: (callback, ms) => timeouts.push({ callback, ms }),
@@ -143,8 +154,15 @@ function questionEnv() {
     env,
     video,
     player,
+    body,
     posted,
     server,
+    // Delivers an event to the page's own document or window listeners.
+    fire(target, type, event) {
+      for (const listener of (target === 'window' ? windowListeners : documentListeners)[type] ?? []) {
+        listener({ type, ...event });
+      }
+    },
     dispatch(type, target = video) {
       for (const listener of documentListeners[type] ?? []) {
         listener({ type, target });
@@ -504,4 +522,93 @@ test('daily goal: confetti falls, unless the system asks for reduced motion: the
   assert.equal(still.posted.at(-1).type, 'chime');
   assert.equal(still.video.paused, true);
   assert.equal(still.player.querySelector('lamiss-celebration__title').textContent, 'Congratulations! 🎉');
+});
+
+// --- The extension's menu under the video ---
+
+function menuPage() {
+  const page = questionEnv();
+  const gear = page.env.run('createLamissMenuButton()');
+  page.player.append(gear);
+  const frame = () => page.env.context.document.getElementById('lamiss-menu-frame');
+  return { ...page, gear, frame };
+}
+
+test('menu: the gear opens the toolbar menu in a frame under it, and closes it again', async () => {
+  const page = menuPage();
+  await flush();
+  assert.equal(page.gear.getAttribute('aria-haspopup'), 'dialog');
+
+  page.gear.listeners.click[0]({ stopPropagation() {} });
+  const frame = page.frame();
+  assert.ok(frame, 'the menu is open');
+  assert.equal(frame.src, `chrome-extension://${page.env.run('chrome.runtime.id')}/popup/popup.html?embedded=1`);
+  assert.equal(frame.allow, 'microphone');
+  assert.equal(frame.title, 'Lamiss settings');
+  assert.equal(page.gear.getAttribute('aria-expanded'), 'true');
+  // Right above the gear (top 500), its right edge lined up with the gear's, before the menu says its height.
+  assert.equal(frame.dataset.placement, 'above');
+  assert.equal(frame.style.left, '580px');
+  assert.equal(frame.style.width, '360px');
+  assert.equal(frame.style.height, '480px');
+  assert.equal(frame.style.top, '12px');
+
+  page.gear.listeners.click[0]({ stopPropagation() {} });
+  assert.equal(page.frame(), null);
+  assert.equal(page.gear.getAttribute('aria-expanded'), 'false');
+});
+
+test('menu: a click elsewhere on the page or Escape closes it; a click on the gear does not count as elsewhere', async () => {
+  const page = menuPage();
+  await flush();
+  page.env.run('openLamissMenu()');
+  page.fire('document', 'pointerdown', { target: page.gear });
+  assert.ok(page.frame(), 'the gear toggles it itself');
+  page.fire('document', 'pointerdown', { target: page.video });
+  assert.equal(page.frame(), null);
+
+  page.env.run('openLamissMenu()');
+  page.fire('document', 'keydown', { key: 'Escape' });
+  assert.equal(page.frame(), null);
+});
+
+test('menu: only its own frame may close it', async () => {
+  const page = menuPage();
+  await flush();
+  page.env.run('openLamissMenu()');
+  const frame = page.frame();
+  frame.contentWindow = {};
+
+  page.fire('window', 'message', { source: {}, data: { type: 'lamiss:close-menu' } });
+  assert.ok(page.frame(), 'another frame or the page itself is ignored');
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'something-else' } });
+  assert.ok(page.frame());
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:close-menu' } });
+  assert.equal(page.frame(), null);
+});
+
+test('menu: it is as tall as the menu says and stays right above the gear; with no room above, it opens below', async () => {
+  const page = menuPage();
+  await flush();
+  page.env.run('openLamissMenu()');
+  const frame = page.frame();
+  frame.contentWindow = {};
+
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:menu-size', height: 300 } });
+  assert.equal(frame.style.height, '300px');
+  assert.equal(frame.style.top, '192px', '500 - 8 - 300');
+  // Never taller than 600 px, nor than the room above the gear.
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:menu-size', height: 2000 } });
+  assert.equal(frame.style.height, '484px');
+  assert.equal(frame.style.top, '8px');
+  // Another frame can't resize it.
+  page.fire('window', 'message', { source: {}, data: { type: 'lamiss:menu-size', height: 250 } });
+  assert.equal(frame.style.height, '484px');
+
+  // Scrolled so the gear is near the top of the window: below it.
+  page.gear.getBoundingClientRect = () => ({ left: 900, right: 940, top: 60, bottom: 96 });
+  page.fire('window', 'message', { source: frame.contentWindow, data: { type: 'lamiss:menu-size', height: 300 } });
+  assert.equal(frame.dataset.placement, 'below');
+  assert.equal(frame.style.top, '104px');
+  assert.equal(frame.style.height, '300px');
 });

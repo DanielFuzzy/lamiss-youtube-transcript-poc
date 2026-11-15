@@ -98,7 +98,7 @@ class FakeElement {
 }
 
 // popup-shared.js and recent-view.js on a page that has every element they ask for.
-function recentViewEnv(responder) {
+function recentViewEnv(responder, extraGlobals = {}) {
   const elements = new Map();
   const document = {
     getElementById(id) {
@@ -108,6 +108,7 @@ function recentViewEnv(responder) {
       return elements.get(id);
     },
     createElement: tag => new FakeElement(tag),
+    documentElement: { dataset: {} },
     querySelector: () => null,
     querySelectorAll: () => []
   };
@@ -115,7 +116,7 @@ function recentViewEnv(responder) {
     responder,
     scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'shared/lamiss-auth.js',
       'popup/popup-shared.js', 'popup/recent-view.js'],
-    globals: { document }
+    globals: { document, ...extraGlobals }
   });
   env.session.data.set('lamissAuth', { accessToken: 'secret-token', expiresAt: futureIso(), user: { id: 7, email: 'ana@example.com', username: 'ana' } });
   const element = id => document.getElementById(id);
@@ -183,4 +184,45 @@ test('recent view: an unreachable backend is described as such', async () => {
   await settle();
   assert.deepEqual(page.shown(), ['recentError']);
   assert.equal(page.element('recentErrorText').textContent, page.env.run("lamissT('popup.unreachable')"));
+});
+
+// --- The menu under the video: the same page in a frame on YouTube ---
+
+test('menu under the video: it asks the page to close it, where the toolbar popup closes itself', () => {
+  const messages = [];
+  const parent = { postMessage: (message, origin) => messages.push({ message, origin }) };
+  const embedded = recentViewEnv(undefined, { location: { search: '?embedded=1' }, window: { parent } });
+  embedded.env.run('closePopup()');
+  assert.deepEqual(plain(messages), [{ message: { type: 'lamiss:close-menu' }, origin: 'https://www.youtube.com' }]);
+  assert.equal(embedded.env.run('document.documentElement.dataset.embedded'), 'true');
+
+  // It tells the page how tall it is, whenever that changes.
+  let observed;
+  class FakeResizeObserver {
+    constructor(callback) { this.callback = callback; }
+    observe(target) { observed = { target, callback: this.callback }; }
+  }
+  const sizedMessages = [];
+  const sized = recentViewEnv(undefined, {
+    location: { search: '?embedded=1' },
+    window: { parent: { postMessage: (message, origin) => sizedMessages.push({ message, origin }) } },
+    ResizeObserver: FakeResizeObserver
+  });
+  sized.env.run('document.documentElement.scrollHeight = 412.4');
+  observed.callback();
+  assert.deepEqual(plain(sizedMessages), [{ message: { type: 'lamiss:menu-size', height: 413 }, origin: 'https://www.youtube.com' }]);
+
+  let closed = false;
+  const toolbarWindow = { close: () => { closed = true; } };
+  toolbarWindow.parent = toolbarWindow;
+  const toolbar = recentViewEnv(undefined, { location: { search: '' }, window: toolbarWindow });
+  toolbar.env.run('closePopup()');
+  assert.equal(closed, true);
+  assert.equal(toolbar.env.run('document.documentElement.dataset.embedded'), undefined);
+
+  // A page that is not in a frame never posts, even with the flag.
+  const top = { close() {} };
+  top.parent = top;
+  const notFramed = recentViewEnv(undefined, { location: { search: '?embedded=1' }, window: top });
+  assert.equal(notFramed.env.run('POPUP_EMBEDDED'), false);
 });
