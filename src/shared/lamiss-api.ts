@@ -225,20 +225,6 @@ async function readCaptionSettings(): Promise<LamissCaptionSettings> {
   try {
     const stored = await chrome.storage.local.get(LAMISS_CAPTION_SETTINGS_KEY);
     return { enabled: (stored[LAMISS_CAPTION_SETTINGS_KEY] as Partial<LamissCaptionSettings> | undefined)?.enabled === true };
-// --- "Hey Lamiss" wake word (Lamiss#85) --------------------------------------------
-
-// On or off for this browser profile; off until the user turns it on. While
-// on and a Lamiss session runs, the offscreen page keeps the microphone open
-// and detects the phrase on this computer: no audio leaves it until the
-// Ask Lamiss card opens.
-type LamissWakeWordSettings = { enabled: boolean };
-
-const LAMISS_WAKE_WORD_SETTINGS_KEY = 'lamissWakeWordSettings';
-
-async function readWakeWordSettings(): Promise<LamissWakeWordSettings> {
-  try {
-    const stored = await chrome.storage.local.get(LAMISS_WAKE_WORD_SETTINGS_KEY);
-    return { enabled: (stored[LAMISS_WAKE_WORD_SETTINGS_KEY] as Partial<LamissWakeWordSettings> | undefined)?.enabled === true };
   } catch {
     return { enabled: false };
   }
@@ -291,6 +277,27 @@ const LAMISS_FETCH_CAPTIONS_MESSAGE = 'FETCH_DOUBLE_CAPTIONS';
 function fetchDoubleCaptions(videoId: string, fromMs: number): Promise<LamissCallResult<LamissCaptionWindow>> {
   const from = Math.max(0, Math.floor(fromMs));
   return callLamiss<LamissCaptionWindow>(`/api/captions/${encodeURIComponent(videoId)}?fromMs=${from}`, { headers: { accept: 'application/json' } });
+}
+
+// --- "Hey Lamiss" wake word (Lamiss#85) --------------------------------------------
+
+// On or off for this browser profile; off until the user turns it on. While
+// on and a Lamiss session runs, the offscreen page keeps the microphone open
+// and detects the phrase on this computer: no audio leaves it until the
+// Ask Lamiss card opens.
+type LamissWakeWordSettings = { enabled: boolean };
+
+const LAMISS_WAKE_WORD_SETTINGS_KEY = 'lamissWakeWordSettings';
+
+async function readWakeWordSettings(): Promise<LamissWakeWordSettings> {
+  try {
+    const stored = await chrome.storage.local.get(LAMISS_WAKE_WORD_SETTINGS_KEY);
+    return { enabled: (stored[LAMISS_WAKE_WORD_SETTINGS_KEY] as Partial<LamissWakeWordSettings> | undefined)?.enabled === true };
+  } catch {
+    return { enabled: false };
+  }
+}
+
 function saveWakeWordSettings(settings: LamissWakeWordSettings): Promise<void> {
   return chrome.storage.local.set({ [LAMISS_WAKE_WORD_SETTINGS_KEY]: settings });
 }
