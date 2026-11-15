@@ -748,3 +748,39 @@ test('hey lamiss: a detection opens the card on the active tab, only if Lamiss r
   await flush();
   assert.deepEqual(other.env.tabsSent, [], 'the active tab has no Lamiss session');
 });
+
+test('daily goal (Lamiss#98): the socket tells Lamiss the time zone, passes DAILY_GOAL_REACHED on, and the chime goes to the offscreen page', async () => {
+  const env = backgroundEnv({
+    extra: async (url) => {
+      if (url.endsWith('/api/learning-sessions')) {
+        return { json: { learningSessionId: 42, videoId: 1, videoExternalId: 'vid', resumed: false, aiKnowledgeReady: true } };
+      }
+      if (url.endsWith('/api/auth/ws-ticket')) {
+        return { json: { ticket: 't', expiresAt: futureIso(30_000) } };
+      }
+      return undefined;
+    }
+  });
+  signIn(env);
+  env.local.data.set('lamissDeviceSettings', { speakerDeviceId: 'speaker-3', volume: 0.4 });
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'start', videoId: 'vid' });
+  await flush();
+  const socket = env.FakeWebSocket.instances[0];
+  socket.readyState = 1;
+  socket.emit('open');
+  await flush();
+
+  const clientInfo = socket.sent.map(data => JSON.parse(data)).find(message => message.type === 'CLIENT_INFO');
+  assert.equal(clientInfo.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+
+  socket.emit('message', { data: JSON.stringify({ type: 'DAILY_GOAL_REACHED', practicedMinutes: 20, goalMinutes: 20 }) });
+  await flush();
+  assert.deepEqual(plain(port.messages.at(-1)), { type: 'server', message: { type: 'DAILY_GOAL_REACHED', practicedMinutes: 20, goalMinutes: 20 } });
+
+  // A tab can't choose the speaker or the volume: only the stored settings count.
+  port.send({ type: 'chime', speakerDeviceId: 'forged', volume: 1 });
+  await flush();
+  assert.deepEqual(env.runtimeSent.find(message => message.type === 'chime'), { target: 'lamiss-offscreen', type: 'chime', speakerDeviceId: 'speaker-3', volume: 0.4 });
+});

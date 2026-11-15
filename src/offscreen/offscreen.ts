@@ -235,6 +235,50 @@ async function speak(requestId: string, text: string, language: string | undefin
   }
 }
 
+// --- Daily goal chime (Lamiss#98) -------------------------------------------------
+
+// A rising arpeggio of soft bells (C6, E6, G6, C7): sine tones with a quiet
+// octave overtone, a gentle attack and a long fade. Much quieter than the voice.
+const CHIME_NOTES_HZ = [1046.5, 1318.5, 1568, 2093];
+const CHIME_NOTE_GAP_S = 0.11;
+const CHIME_NOTE_LENGTH_S = 1.4;
+const CHIME_VOLUME_SHARE = 0.3;
+
+async function playChime(output: SpeakOutput = {}): Promise<void> {
+  const audioContext = new AudioContext();
+  try {
+    const sinkable = audioContext as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (output.speakerDeviceId && sinkable.setSinkId) {
+      // A speaker that is gone falls back to the default one.
+      await sinkable.setSinkId(output.speakerDeviceId).catch(() => undefined);
+    }
+    await audioContext.resume().catch(() => undefined);
+    const master = audioContext.createGain();
+    master.gain.value = clampVolume(output.volume) * CHIME_VOLUME_SHARE;
+    master.connect(audioContext.destination);
+    const start = audioContext.currentTime + 0.05;
+    CHIME_NOTES_HZ.forEach((frequency, index) => {
+      const at = start + index * CHIME_NOTE_GAP_S;
+      for (const [multiple, level] of [[1, 0.5], [2, 0.08]] as const) {
+        const tone = audioContext.createOscillator();
+        tone.type = 'sine';
+        tone.frequency.value = frequency * multiple;
+        const envelope = audioContext.createGain();
+        envelope.gain.setValueAtTime(0.0001, at);
+        envelope.gain.exponentialRampToValueAtTime(level, at + 0.02);
+        envelope.gain.exponentialRampToValueAtTime(0.0001, at + CHIME_NOTE_LENGTH_S);
+        tone.connect(envelope).connect(master);
+        tone.start(at);
+        tone.stop(at + CHIME_NOTE_LENGTH_S + 0.05);
+      }
+    });
+    const lengthMs = ((CHIME_NOTES_HZ.length - 1) * CHIME_NOTE_GAP_S + CHIME_NOTE_LENGTH_S + 0.2) * 1000;
+    await new Promise(resolve => setTimeout(resolve, lengthMs));
+  } finally {
+    void audioContext.close();
+  }
+}
+
 // --- "Hey Lamiss" (Lamiss#85) -----------------------------------------------------
 
 // After a detection, none for this long; nor while Lamiss speaks and this
@@ -407,6 +451,13 @@ chrome.runtime.onMessage.addListener((message: OffscreenCommand, sender) => {
     if (speaking?.requestId === message.requestId) {
       stopSpeaking();
     }
+    return false;
+  }
+  if (message.type === 'chime') {
+    void playChime({
+      speakerDeviceId: optionalString(message.speakerDeviceId),
+      volume: typeof message.volume === 'number' ? message.volume : undefined
+    }).catch((error: unknown) => console.warn('Lamiss offscreen: could not play the chime:', error));
     return false;
   }
   if (message.type === 'wake-start') {

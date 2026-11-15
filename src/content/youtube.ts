@@ -1065,6 +1065,9 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
       lamissMonitoringStarted = true;
       renderLamissTimer();
       break;
+    case 'DAILY_GOAL_REACHED':
+      onLamissDailyGoalReached(server.practicedMinutes, server.goalMinutes);
+      break;
   }
 }
 
@@ -1527,6 +1530,10 @@ function hideLamissQuestion(): void {
   lamissQuestion = null;
   restoreLamissVolume();
   document.getElementById(LAMISS_QUESTION_ID)?.remove();
+  // A celebration that came during the question shows once it is closed.
+  if (lamissPendingCelebration) {
+    window.setTimeout(() => showLamissCelebration(false), 0);
+  }
 }
 
 function lamissStatusText(question: LamissQuestionState): string {
@@ -1820,7 +1827,12 @@ function onLamissResume(): void {
 function resumeLamissVideo(): void {
   const question = lamissQuestion;
   hideLamissQuestion();
-  if (question && !question.holdPaused) {
+  const play = !question || question.holdPaused;
+  // A waiting celebration keeps the video paused; its Continue plays it.
+  if (lamissPendingCelebration && showLamissCelebration(play)) {
+    return;
+  }
+  if (!play) {
     return;
   }
   getLamissVideo()?.play().catch((error: unknown) => {
@@ -1859,6 +1871,204 @@ function showLamissToast(text: string): void {
   toast.textContent = text;
   window.clearTimeout(lamissToastTimer);
   lamissToastTimer = window.setTimeout(() => document.getElementById(LAMISS_TOAST_ID)?.remove(), 6000);
+}
+
+// ---------------------------------------------------------------------------
+// Daily goal celebration (Lamiss#98): when today's practice reaches the daily
+// goal, the video pauses, confetti falls, a soft chime plays and a card says
+// congratulations. Continue (or Escape, or Enter) closes it and plays the
+// video again if Lamiss paused it. It waits for an open question to close.
+// The card is meant to grow (streaks, a next goal…): its body is a list.
+// ---------------------------------------------------------------------------
+
+const LAMISS_CELEBRATION_ID = 'lamiss-celebration';
+const LAMISS_CONFETTI_MS = 2800;
+const LAMISS_CONFETTI_PIECES = 150;
+const LAMISS_CONFETTI_COLORS = ['#a78bfa', '#c026d3', '#7c3aed', '#facc15', '#f472b6', '#22d3ee', '#ffffff'];
+
+type LamissCelebrationGoal = { practicedMinutes: number; goalMinutes: number };
+
+let lamissPendingCelebration: LamissCelebrationGoal | null = null;
+// resumeVideo: Lamiss paused the video for the card (or would have played it).
+let lamissCelebration: { resumeVideo: boolean } | null = null;
+
+function onLamissDailyGoalReached(practicedMinutes: number, goalMinutes: number): void {
+  if (!Number.isFinite(practicedMinutes) || !Number.isFinite(goalMinutes)) {
+    return;
+  }
+  lamissPendingCelebration = { practicedMinutes, goalMinutes };
+  showLamissCelebration(false);
+}
+
+// Shows the waiting celebration unless a question or another celebration is
+// open. resumeAfter: play the video on Continue even if it isn't playing now.
+// Returns whether it was shown.
+function showLamissCelebration(resumeAfter: boolean): boolean {
+  const goal = lamissPendingCelebration;
+  const player = getLamissPlayer();
+  if (!goal || lamissQuestion || lamissCelebration || !player) {
+    return false;
+  }
+  lamissPendingCelebration = null;
+  const video = getLamissVideo();
+  const playing = Boolean(video && !video.paused);
+  if (playing) {
+    video?.pause();
+  }
+  lamissCelebration = { resumeVideo: resumeAfter || playing };
+  const overlay = createLamissCelebration(goal);
+  player.append(overlay);
+  (overlay.querySelector('.lamiss-celebration__continue') as HTMLButtonElement | null)?.focus();
+  postLamissLive({ type: 'chime' });
+  if (!lamissPrefersReducedMotion()) {
+    launchLamissConfetti(overlay);
+  }
+  return true;
+}
+
+function closeLamissCelebration(): void {
+  const celebration = lamissCelebration;
+  lamissCelebration = null;
+  document.getElementById(LAMISS_CELEBRATION_ID)?.remove();
+  if (celebration?.resumeVideo) {
+    getLamissVideo()?.play().catch((error: unknown) => {
+      console.warn('Lamiss POC: could not resume the video:', error);
+    });
+  }
+}
+
+function lamissPrefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
+function createLamissCelebration(goal: LamissCelebrationGoal): HTMLDivElement {
+  const overlay = document.createElement('div');
+  overlay.id = LAMISS_CELEBRATION_ID;
+  overlay.className = 'lamiss-question lamiss-celebration';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'lamiss-celebration-title');
+
+  // YouTube's player shortcuts must not see these keys, nor its player the clicks.
+  for (const type of ['keydown', 'keyup', 'keypress']) {
+    overlay.addEventListener(type, event => event.stopPropagation());
+  }
+  overlay.addEventListener('keydown', (event) => {
+    if ((event as KeyboardEvent).key === 'Escape') {
+      event.preventDefault();
+      closeLamissCelebration();
+    }
+  });
+  overlay.addEventListener('click', event => event.stopPropagation());
+
+  const card = document.createElement('div');
+  card.className = 'lamiss-question__card lamiss-celebration__card';
+
+  const header = document.createElement('div');
+  header.className = 'lamiss-question__header';
+  const logo = document.createElement('span');
+  logo.className = 'lamiss-question__logo';
+  logo.append(createLamissLogoImage());
+  const name = document.createElement('span');
+  name.className = 'lamiss-question__heading';
+  name.textContent = 'Lamiss';
+  header.append(logo, name);
+
+  const title = document.createElement('h2');
+  title.id = 'lamiss-celebration-title';
+  title.className = 'lamiss-celebration__title';
+  title.textContent = lamissT('celebration.title');
+
+  // One line per achievement; later features add their own.
+  const body = document.createElement('div');
+  body.className = 'lamiss-celebration__body';
+  const dailyGoal = document.createElement('p');
+  dailyGoal.className = 'lamiss-celebration__line';
+  dailyGoal.textContent = lamissT('celebration.dailyGoal', { minutes: goal.practicedMinutes });
+  body.append(dailyGoal);
+
+  const actions = document.createElement('div');
+  actions.className = 'lamiss-question__actions';
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'lamiss-question__submit lamiss-celebration__continue';
+  next.textContent = lamissT('question.continue');
+  next.addEventListener('click', closeLamissCelebration);
+  actions.append(next);
+
+  card.append(header, title, body, actions);
+  overlay.append(card);
+  return overlay;
+}
+
+// A burst of confetti from the top of the player that falls and fades out.
+// Drawn on a canvas above the card; it never takes clicks.
+function launchLamissConfetti(overlay: HTMLElement): void {
+  const canvas = document.createElement('canvas');
+  canvas.className = 'lamiss-celebration__confetti';
+  canvas.setAttribute('aria-hidden', 'true');
+  const context = canvas.getContext?.('2d');
+  if (!context) {
+    return;
+  }
+  overlay.append(canvas);
+  const ratio = window.devicePixelRatio || 1;
+  const width = overlay.clientWidth || 640;
+  const height = overlay.clientHeight || 360;
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+  context.scale(ratio, ratio);
+
+  const pieces = Array.from({ length: LAMISS_CONFETTI_PIECES }, () => ({
+    x: width * (0.2 + Math.random() * 0.6),
+    y: height * (-0.05 - Math.random() * 0.15),
+    vx: (Math.random() - 0.5) * 9,
+    vy: 2 + Math.random() * 6,
+    size: 5 + Math.random() * 6,
+    angle: Math.random() * Math.PI,
+    spin: (Math.random() - 0.5) * 0.3,
+    wobble: Math.random() * Math.PI * 2,
+    color: LAMISS_CONFETTI_COLORS[Math.floor(Math.random() * LAMISS_CONFETTI_COLORS.length)]
+  }));
+
+  const startedAt = performance.now();
+  let last = startedAt;
+  const frame = (now: number) => {
+    if (!canvas.isConnected) {
+      return;
+    }
+    const elapsed = now - startedAt;
+    if (elapsed >= LAMISS_CONFETTI_MS) {
+      canvas.remove();
+      return;
+    }
+    // Speeds are per 60 fps frame.
+    const step = Math.min(3, (now - last) / 16.7);
+    last = now;
+    context.clearRect(0, 0, width, height);
+    context.globalAlpha = Math.min(1, (LAMISS_CONFETTI_MS - elapsed) / 700);
+    for (const piece of pieces) {
+      piece.vy += 0.12 * step;
+      piece.vx *= 0.99;
+      piece.wobble += 0.1 * step;
+      piece.x += (piece.vx + Math.sin(piece.wobble)) * step;
+      piece.y += piece.vy * step;
+      piece.angle += piece.spin * step;
+      context.save();
+      context.translate(piece.x, piece.y);
+      context.rotate(piece.angle);
+      context.fillStyle = piece.color;
+      // Flat paper turning in the air: its height follows the wobble.
+      context.fillRect(-piece.size / 2, -piece.size / 4, piece.size, (piece.size / 2) * Math.abs(Math.cos(piece.wobble)) + 1);
+      context.restore();
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 // ---------------------------------------------------------------------------

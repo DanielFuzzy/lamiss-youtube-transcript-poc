@@ -404,3 +404,69 @@ test('ask lamiss: a question Lamiss is asking comes first', async () => {
   assert.equal(page.env.run('lamissQuestion.mode'), 'answer');
   assert.equal(page.posted.filter(message => message.type === 'listen').length, listens);
 });
+
+// --- Daily goal celebration (Lamiss#98) ---
+
+const celebrationOpen = page => Boolean(page.env.context.document.getElementById('lamiss-celebration'));
+
+function pressOnCelebration(page, key) {
+  const overlay = page.env.context.document.getElementById('lamiss-celebration');
+  for (const listener of overlay.listeners.keydown) {
+    listener({ key, preventDefault() {}, stopPropagation() {} });
+  }
+}
+
+test('daily goal: the video pauses, the card congratulates, the chime plays, and Continue plays the video again', async () => {
+  const page = questionEnv();
+  await flush();
+  page.server({ type: 'DAILY_GOAL_REACHED', practicedMinutes: 20, goalMinutes: 20 });
+
+  assert.equal(celebrationOpen(page), true);
+  assert.equal(page.video.paused, true);
+  assert.equal(page.posted.at(-1).type, 'chime');
+  assert.equal(page.player.querySelector('lamiss-celebration__title').textContent, 'Congratulations! 🎉');
+  assert.equal(page.player.querySelector('lamiss-celebration__line').textContent, 'You reached your daily goal: 20 minutes of practice today.');
+
+  const plays = page.video.plays;
+  page.player.querySelector('lamiss-celebration__continue').listeners.click[0]();
+  assert.equal(celebrationOpen(page), false);
+  assert.equal(page.video.paused, false);
+  assert.equal(page.video.plays, plays + 1);
+});
+
+test('daily goal: Escape closes it, and a video the user had paused stays paused', async () => {
+  const page = questionEnv();
+  await flush();
+  page.video.pause();
+  page.server({ type: 'DAILY_GOAL_REACHED', practicedMinutes: 31, goalMinutes: 30 });
+  assert.equal(page.player.querySelector('lamiss-celebration__line').textContent, 'You reached your daily goal: 31 minutes of practice today.');
+
+  pressOnCelebration(page, 'Escape');
+  assert.equal(celebrationOpen(page), false);
+  assert.equal(page.video.paused, true);
+  assert.equal(page.video.plays, 0);
+});
+
+test('daily goal: it waits for an open question, and Continue then plays the video Lamiss paused for it', async () => {
+  const page = questionEnv();
+  await flush();
+  page.server({ type: 'PAUSE_VIDEO' });
+  page.server({ type: 'ASK_QUESTION', eventId: 'e1', question: 'What did she say?' });
+  page.server({ type: 'DAILY_GOAL_REACHED', practicedMinutes: 20, goalMinutes: 20 });
+  assert.equal(celebrationOpen(page), false);
+  assert.ok(!page.posted.some(message => message.type === 'chime'));
+
+  page.server({ type: 'FEEDBACK', correct: true, feedback: 'Well done.' });
+  page.server({ type: 'RESUME_VIDEO' });
+  await page.speechEnded();
+  page.runTimeouts(0);
+  page.env.run('resumeLamissVideo()');
+
+  assert.equal(page.cardOpen(), false);
+  assert.equal(celebrationOpen(page), true);
+  assert.equal(page.video.paused, true, 'the celebration holds the video');
+  assert.equal(page.posted.at(-1).type, 'chime');
+
+  pressOnCelebration(page, 'Escape');
+  assert.equal(page.video.paused, false);
+});
