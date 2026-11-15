@@ -7,6 +7,13 @@
       "allowOverrides": true,
       "chromeWebStore": false
     },
+    "pre": {
+      "$comment": "PRE: the backend on Railway, for the unpacked extension (npm run build:pre, then reload compiled/ in chrome://extensions). Keeps the manifest key, so it has the same extension ID as development: the same CORS origin and Google redirect URI.",
+      "apiUrl": "https://lamiss-production.up.railway.app",
+      "googleClientId": "830984703143-ll10jstqbtsqq62krpm4iqnlke2g6r3e.apps.googleusercontent.com",
+      "allowOverrides": false,
+      "chromeWebStore": false
+    },
     "staging": {
       "apiUrl": null,
       "googleClientId": null,

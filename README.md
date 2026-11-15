@@ -33,6 +33,20 @@ this repository or to the build.
 
 `compiled/` is the unpacked extension. It is build output and is not committed.
 
+### Switch between the local backend and PRE (Railway)
+
+| Command | Backend |
+|---|---|
+| `npm run build:local` | your local backend (`http://localhost:8080`, or `LAMISS_API_URL` from `.env`) |
+| `npm run build:pre` | PRE on Railway (`https://lamiss-production.up.railway.app`, `wss://` for the live session) |
+
+Both write `compiled/`. After switching, click **Reload** on Lamiss in
+`chrome://extensions` and sign in again: the sign-in is per backend. PRE keeps
+the same extension ID as local, so PRE needs `chrome-extension://fjjelpamfjfkndcgjdfmkjglkimhokec`
+in its `LAMISS_CORS_ALLOWED_ORIGINS` and the same `GOOGLE_CLIENT_ID` as the
+extension. PRE's address and client ID live in `config/environments.json`
+(`pre`); `.env` is ignored for it.
+
 These variables only apply to **development** builds. Each environment's backend
 (development, staging, production) is set in `config/environments.json`; the
 staging and production packages for testers and the Chrome Web Store are made
@@ -170,6 +184,31 @@ the video paused only for a question that `PAUSE_VIDEO` announced, and keeps
 reporting positions while a question plays over the video. The worker stores
 with each pending question whether it was paused, so a question replayed after
 a reconnect pauses only if it did the first time.
+
+**Ask Lamiss** (Lamiss#84). While Lamiss runs on a video, **Alt+L** (a
+`chrome.commands` shortcut, changeable in `chrome://extensions/shortcuts`) or the
+mic button next to the question timer opens the question card for the
+learner's own question, already listening; it can also be typed. The video
+keeps playing at 20% volume while Lamiss listens and answers. The worker sends
+the question to `POST /api/user-interaction/user-asks` (the card's request ID is
+the `interactionId`, so a retry gets the stored answer) and tells the chat panel
+to reload its history. The answer shows in the card without a grade, is read
+aloud in the tutor language (or the video's), and the card closes 4 s later.
+**Escape** or **✕** cancels. A question Lamiss is asking comes first: the
+shortcut does nothing then.
+
+**"Hey Lamiss"** (Lamiss#85, [docs/wake-word.md](docs/wake-word.md)). An
+opt-in switch in Audio & Voice (`lamissWakeWordSettings`, off by default),
+shown only in builds with a wake word model. While it is on and a Lamiss
+session runs, the offscreen page keeps the microphone open and detects the
+phrase on this computer with openWakeWord models run by onnxruntime-web
+(`offscreen/wake-word.ts`); a detection opens the Ask Lamiss card on the active
+tab if Lamiss runs there. Nothing is detected while Lamiss speaks (and 1 s
+after), while she listens, or within 3 s of a detection. A green dot on the
+Ask button shows it is listening. The models are never committed:
+`npm run fetch:wakeword` downloads them; development builds use openWakeWord's
+non-commercial "hey jarvis" until the "Hey Lamiss" model is trained, and
+release builds never include it.
 
 **Languages** (TDR-0003,
 [docs/TDR-0003-Language-Preferences.md](https://github.com/DanielFuzzy/Lamiss/blob/main/docs/TDR-0003-Language-Preferences.md)).

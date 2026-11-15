@@ -57,6 +57,16 @@ test('build config: staging and production come only from the file, over https o
   assert.throws(() => resolveBuildConfig(environments(), 'qa', {}), /unknown environment/);
 });
 
+test('build config: pre is the Railway backend, from the file only, keeping the development extension ID', () => {
+  const pre = resolveBuildConfig(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'environments.json'), 'utf8')), 'pre', {});
+  assert.equal(pre.apiOrigin, 'https://lamiss-production.up.railway.app');
+  assert.equal(pre.wsOrigin, 'wss://lamiss-production.up.railway.app');
+  assert.match(pre.googleClientId, /\.apps\.googleusercontent\.com$/);
+  assert.equal(pre.chromeWebStore, false);
+  assert.throws(() => resolveBuildConfig(environments({ pre: { apiUrl: 'https://pre.lamiss.app', googleClientId: CLIENT_ID } }), 'pre', { LAMISS_API_URL: 'http://localhost:8080' }), /can only override development/);
+  assert.throws(() => resolveBuildConfig(environments({ pre: { apiUrl: 'http://pre.lamiss.app', googleClientId: CLIENT_ID } }), 'pre', {}), /https/);
+});
+
 test('build config: local and private hosts are recognized', () => {
   for (const host of ['localhost', 'app.localhost', '127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.0.10', '169.254.1.1', '100.64.0.1', '[::1]', 'printer.local']) {
     assert.equal(isLocalOrPrivateHost(host), true, host);
@@ -212,4 +222,31 @@ test('build config: store-draft is a store package for a local backend, without 
   assert.throws(() => resolveBuildConfig(environments(), 'store-draft', { LAMISS_API_URL: 'http://localhost:9999' }), /can only override development/);
   // Production keeps refusing what store-draft allows.
   assert.throws(() => resolveBuildConfig(environments({ production: { apiUrl: 'http://localhost:8080', googleClientId: CLIENT_ID } }), 'production', {}), /https/);
+});
+
+test('package: "Hey Lamiss" ships only a releasable model, with nothing looser than wasm-unsafe-eval', () => {
+  const { dir, packageOnce } = packagedCopy();
+  packageOnce();
+  const extension = path.join(dir, 'dist', 'production', 'extension');
+  // Without a model, no wake word files at all.
+  assert.equal(fs.existsSync(path.join(extension, 'wakeword')), false);
+  assert.equal(fs.existsSync(path.join(extension, 'vendor')), false);
+  assert.equal(fs.existsSync(path.join(extension, 'offscreen', 'wake-worklet.js')), false);
+
+  const has = (problems, pattern) => assert.ok(problems.some(problem => pattern.test(problem)), `${pattern} in ${JSON.stringify(problems)}`);
+  const manifestFile = path.join(extension, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  manifest.content_security_policy = { extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" };
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  // wasm-unsafe-eval without a wake word: refused.
+  has(validatePackage(extension, { environment: 'production', expectedVersion: '0.1.0' }), /allows remote or inline code/);
+
+  fs.mkdirSync(path.join(extension, 'wakeword'));
+  fs.writeFileSync(path.join(extension, 'wakeword', 'model.json'), JSON.stringify({ phrase: 'Hey Jarvis', model: 'wake-word.onnx', threshold: 0.5, developmentOnly: true }));
+  fs.writeFileSync(path.join(extension, 'wakeword', 'wake-word.onnx'), 'model');
+  has(validatePackage(extension, { environment: 'production', expectedVersion: '0.1.0' }), /for development only/);
+
+  fs.writeFileSync(path.join(extension, 'wakeword', 'model.json'), JSON.stringify({ phrase: 'Hey Lamiss', model: 'wake-word.onnx', threshold: 0.5, developmentOnly: false }));
+  assert.deepEqual(validatePackage(extension, { environment: 'production', expectedVersion: '0.1.0' }), [], 'a releasable model with wasm-unsafe-eval');
+  fs.rmSync(dir, { recursive: true, force: true });
 });
