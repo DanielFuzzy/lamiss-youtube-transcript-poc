@@ -693,7 +693,8 @@ type LamissServerMessage =
   // language: the ISO 639-1 code the feedback is written in (TDR-0002), or null.
   | { type: 'FEEDBACK'; correct: boolean; feedback: string; language?: string | null }
   | { type: 'RESUME_VIDEO' }
-  | { type: 'ERROR'; message: string }
+  // errorCode daily_limit_reached comes with the limit that was reached (Lamiss#107).
+  | { type: 'ERROR'; message: string; errorCode?: string; limit?: string }
   // When the next question will come if the video keeps playing; atVideoMs
   // is null when none is coming.
   | { type: 'NEXT_QUESTION'; atVideoMs: number | null; waitingForAnswer: boolean }

@@ -353,7 +353,16 @@ type LamissCallOptions = {
   accessToken?: string;
 };
 
-type LamissProblem = { detail?: string; retryable?: boolean; errorCode?: string };
+// limit: which daily limit was reached, with errorCode daily_limit_reached (Lamiss#107).
+type LamissProblem = { detail?: string; retryable?: boolean; errorCode?: string; limit?: string };
+
+// A learner's daily limit of paid AI calls (Lamiss#107), in the app language.
+function lamissDailyLimitMessage(limit: unknown): string {
+  const keys: Record<string, LamissMessageKey> = {
+    ASK: 'limit.ASK', ANSWER: 'limit.ANSWER', TRANSCRIPTION: 'limit.TRANSCRIPTION', SPEECH: 'limit.SPEECH', NEW_VIDEO: 'limit.NEW_VIDEO'
+  };
+  return lamissT((typeof limit === 'string' && keys[limit]) || 'limit.other');
+}
 
 async function resolveAccessToken(options: LamissCallOptions): Promise<string | undefined> {
   if (options.anonymous) {
@@ -422,7 +431,9 @@ async function callLamiss<T>(path: string, init: RequestInit, options: LamissCal
       return {
         ok: false,
         status: response.status,
-        error: problem?.detail ?? `HTTP ${response.status}`,
+        error: problem?.errorCode === 'daily_limit_reached'
+          ? lamissDailyLimitMessage(problem.limit)
+          : problem?.detail ?? `HTTP ${response.status}`,
         retryable: problem?.retryable ?? response.status >= 500,
         // TDR-0001: the machine-readable reason, when the backend gives one.
         ...(typeof problem?.errorCode === 'string' ? { errorCode: problem.errorCode } : {})
