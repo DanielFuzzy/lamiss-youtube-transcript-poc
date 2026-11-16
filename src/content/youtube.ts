@@ -1082,6 +1082,14 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
     case 'DAILY_GOAL_REACHED':
       onLamissDailyGoalReached(server.practicedMinutes, server.goalMinutes);
       break;
+    case 'CAPTURE_FRAMES': {
+      // Lamiss's next question is about what the video shows (Lamiss#89).
+      const requestId = server.requestId;
+      void captureLamissFramesOverTime().catch(() => []).then((frames) => {
+        postLamissLive({ type: 'visual-frames', requestId, frames });
+      });
+      break;
+    }
   }
 }
 

@@ -634,3 +634,14 @@ test('daily limits (Lamiss#107): past the limit of checked answers, the card say
   page.server({ type: 'ERROR', message: 'AI down' });
   assert.equal(page.env.run('lamissQuestion.error'), "Lamiss couldn't check your answer: AI down. Try again.");
 });
+
+test('visual questions (Lamiss#89): asked for frames, the page answers with what it could capture', async () => {
+  const page = questionEnv();
+  await flush();
+
+  page.server({ type: 'CAPTURE_FRAMES', requestId: 'v-1' });
+  await flush();
+
+  // The fake video has no picture yet: nothing could be captured, and the page says so.
+  assert.deepEqual(page.posted.at(-1), { type: 'visual-frames', requestId: 'v-1', frames: [] });
+});

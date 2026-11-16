@@ -699,7 +699,9 @@ type LamissServerMessage =
   // is null when none is coming.
   | { type: 'NEXT_QUESTION'; atVideoMs: number | null; waitingForAnswer: boolean }
   // Today's practice just reached the daily goal (Lamiss#98); sent once a day.
-  | { type: 'DAILY_GOAL_REACHED'; practicedMinutes: number; goalMinutes: number };
+  | { type: 'DAILY_GOAL_REACHED'; practicedMinutes: number; goalMinutes: number }
+  // A question about what the video shows is due (Lamiss#89): capture a few frames now.
+  | { type: 'CAPTURE_FRAMES'; requestId: string };
 
 type LamissLiveClientMessage =
   // positionMs: where the video is when Lamiss starts (Lamiss#91).
@@ -715,6 +717,8 @@ type LamissLiveClientMessage =
   | { type: 'stop-listening'; requestId: string; discard: boolean }
   | { type: 'speak'; requestId: string; text: string; language?: string }
   | { type: 'stop-speaking'; requestId: string }
+  // The frames for a CAPTURE_FRAMES (Lamiss#89): JPEG data URLs, none when they couldn't be taken.
+  | { type: 'visual-frames'; requestId: string; frames: string[] }
   // The soft chime of the daily goal celebration (Lamiss#98).
   | { type: 'chime' }
   | { type: 'keepalive' };
@@ -1136,6 +1140,15 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
       break;
     case 'stop-listening':
       void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'stop-listening', requestId: message.requestId, discard: message.discard === true }).catch(() => undefined);
+      break;
+    case 'visual-frames':
+      // At most three image data URLs; the backend checks them again.
+      if (socket && typeof message.requestId === 'string') {
+        const frames = (Array.isArray(message.frames) ? message.frames : [])
+          .filter((frame): frame is string => typeof frame === 'string' && /^data:image\/(?:jpeg|png);base64,/.test(frame))
+          .slice(0, 3);
+        socket.send(JSON.stringify({ type: 'VISUAL_FRAMES', requestId: message.requestId, frames }));
+      }
       break;
     case 'stop-speaking':
       void chrome.runtime.sendMessage({ target: 'lamiss-offscreen', type: 'stop-speaking', requestId: message.requestId }).catch(() => undefined);

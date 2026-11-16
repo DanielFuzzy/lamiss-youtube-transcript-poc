@@ -80,7 +80,8 @@ type LamissSignInFailure = 'cancelled' | 'interaction_required' | 'state_mismatc
 const LAMISS_PRIVACY_POLICY_URL = 'https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/privacy-policy.html';
 const LAMISS_PRIVACY_NOTICE_KEY = 'lamissPrivacyNotice';
 // 2: questions carry still images of the video (Lamiss#88).
-const LAMISS_PRIVACY_NOTICE_VERSION = 2;
+// 3: Lamiss's own questions about what the video shows send still images too (Lamiss#89).
+const LAMISS_PRIVACY_NOTICE_VERSION = 3;
 
 async function hasAcceptedPrivacyNotice(): Promise<boolean> {
   try {

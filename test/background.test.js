@@ -47,7 +47,7 @@ function googleSignsIn(env, override = {}) {
 function backgroundEnv(options = {}) {
   const env = createExtensionEnv({ scripts: ['background.js'], responder: backend(options.extra), tabs: options.tabs });
   if (!options.noConsent) {
-    env.local.data.set('lamissPrivacyNotice', { version: 2, acceptedAt: '2026-11-01T00:00:00.000Z' });
+    env.local.data.set('lamissPrivacyNotice', { version: 3, acceptedAt: '2026-11-01T00:00:00.000Z' });
   }
   return env;
 }
@@ -594,12 +594,12 @@ test('sign-in: "Agree and sign in" on an extension page records the acceptance a
   googleSignsIn(env);
   const result = await env.dispatchMessage({ type: 'lamiss:sign-in', acceptPrivacyNotice: true }, senders.popup);
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(env.local.data.get('lamissPrivacyNotice').version, 2);
+  assert.equal(env.local.data.get('lamissPrivacyNotice').version, 3);
 });
 
-test('sign-in (Lamiss#88): a notice accepted before questions carried video frames must be accepted again', async () => {
+test('sign-in (Lamiss#88, Lamiss#89): a notice accepted before video frames were sent must be accepted again', async () => {
   const env = backgroundEnv({ noConsent: true });
-  env.local.data.set('lamissPrivacyNotice', { version: 1, acceptedAt: '2026-11-01T00:00:00.000Z' });
+  env.local.data.set('lamissPrivacyNotice', { version: 2, acceptedAt: '2026-11-01T00:00:00.000Z' });
   googleSignsIn(env);
   const result = await env.dispatchMessage({ type: 'lamiss:sign-in' }, senders.popup);
   assert.equal(result.ok, false);
@@ -858,4 +858,37 @@ test('questions from the position (Lamiss#91): the session starts with where the
   other.send({ type: 'start', videoId: 'vid2', positionMs: Number.NaN });
   await flush();
   assert.deepEqual(sessionBodies.at(-1), { videoExternalId: 'vid2' });
+});
+
+test('visual questions (Lamiss#89): CAPTURE_FRAMES goes to the tab, and its frames go back as VISUAL_FRAMES, at most three', async () => {
+  const env = backgroundEnv({
+    extra: async (url) => {
+      if (url.endsWith('/api/learning-sessions')) {
+        return { json: { learningSessionId: 42, videoId: 1, videoExternalId: 'vid', resumed: false, aiKnowledgeReady: true } };
+      }
+      if (url.endsWith('/api/auth/ws-ticket')) {
+        return { json: { ticket: 't', expiresAt: futureIso(30_000) } };
+      }
+      return undefined;
+    }
+  });
+  signIn(env);
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'start', videoId: 'vid' });
+  await flush();
+  const socket = env.FakeWebSocket.instances[0];
+  socket.readyState = 1;
+  socket.emit('open');
+  await flush();
+
+  socket.emit('message', { data: JSON.stringify({ type: 'CAPTURE_FRAMES', requestId: 'v-1' }) });
+  await flush();
+  assert.deepEqual(plain(port.messages.at(-1)), { type: 'server', message: { type: 'CAPTURE_FRAMES', requestId: 'v-1' } });
+
+  const jpeg = 'data:image/jpeg;base64,AQID';
+  port.send({ type: 'visual-frames', requestId: 'v-1', frames: [jpeg, 'not a frame', jpeg, jpeg, jpeg] });
+  await flush();
+  const sent = socket.sent.map(data => JSON.parse(data)).filter(message => message.type === 'VISUAL_FRAMES');
+  assert.deepEqual(sent, [{ type: 'VISUAL_FRAMES', requestId: 'v-1', frames: [jpeg, jpeg, jpeg] }]);
 });
