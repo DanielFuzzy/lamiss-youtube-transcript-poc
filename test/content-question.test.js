@@ -612,3 +612,21 @@ test('menu: it is as tall as the menu says and stays right above the gear; with 
   assert.equal(frame.style.top, '104px');
   assert.equal(frame.style.height, '300px');
 });
+
+test('daily limits (Lamiss#107): past the limit of checked answers, the card says so as it is, without "try again"', async () => {
+  const page = questionEnv();
+  await flush();
+  page.server({ type: 'PAUSE_VIDEO' });
+  page.server({ type: 'ASK_QUESTION', eventId: 'e1', question: 'What did she say?' });
+  page.env.run("lamissQuestion.phase = 'sending'; lamissQuestion.answer = 'Hello';");
+
+  page.server({ type: 'ERROR', message: 'You have reached today\'s limit for answers checked by Lamiss.', errorCode: 'daily_limit_reached', limit: 'ANSWER' });
+
+  assert.equal(page.phase(), 'answering');
+  assert.equal(page.env.run('lamissQuestion.error'), "You've reached today's limit of answers Lamiss can check. It resets at midnight UTC.");
+
+  // Any other error still offers to try again.
+  page.env.run("lamissQuestion.phase = 'sending'");
+  page.server({ type: 'ERROR', message: 'AI down' });
+  assert.equal(page.env.run('lamissQuestion.error'), "Lamiss couldn't check your answer: AI down. Try again.");
+});

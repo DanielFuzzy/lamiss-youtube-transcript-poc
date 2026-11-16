@@ -298,3 +298,22 @@ test('account: DELETE /api/me with the token; 204 is a success without a body', 
   assert.equal(env.fetchCalls[0].init.method, 'DELETE');
   assert.equal(env.fetchCalls[0].headers.get('authorization'), 'Bearer secret-token');
 });
+
+test('daily limits (Lamiss#107): a reached limit is described in the app language, not with the backend text', async () => {
+  const env = pageEnv(async () => ({
+    status: 429,
+    json: { detail: 'You have reached today\'s limit for new videos. It resets at midnight UTC.', errorCode: 'daily_limit_reached', limit: 'NEW_VIDEO', retryable: false }
+  }));
+  const refused = plain(await env.run('fetchPreferences()'));
+  assert.deepEqual(refused, {
+    ok: false, status: 429, retryable: false, errorCode: 'daily_limit_reached',
+    error: "You've reached today's limit of new videos; videos Lamiss already knows still work. It resets at midnight UTC."
+  });
+
+  for (const listener of env.chrome.storage.onChanged.listeners) {
+    listener({ lamissAppLanguage: { newValue: 'es' } }, 'local');
+  }
+  assert.equal(env.run("lamissDailyLimitMessage('ASK')"), 'Has alcanzado el límite de preguntas a Lamiss de hoy. Se reinicia a medianoche UTC.');
+  // A limit this version doesn't know yet still gets a sensible message.
+  assert.equal(env.run("lamissDailyLimitMessage('SOMETHING_NEW')"), 'Has alcanzado el límite de Lamiss de hoy. Se reinicia a medianoche UTC.');
+});

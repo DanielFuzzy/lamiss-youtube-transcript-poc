@@ -1056,7 +1056,12 @@ function onLamissLiveMessage(message: LamissLiveWorkerMessage): void {
       onLamissResume();
       break;
     case 'ERROR':
-      onLamissError(server.message);
+      if (server.errorCode === 'daily_limit_reached') {
+        // Shown as it is: trying again today can't help (Lamiss#107).
+        onLamissError(lamissDailyLimitMessage(server.limit), false);
+      } else {
+        onLamissError(server.message);
+      }
       break;
     case 'NEXT_QUESTION':
       // Each one starts a new range for the progress bar, from where the video is now.
@@ -1846,12 +1851,12 @@ function resumeLamissVideo(): void {
 // The backend reports problems without closing the socket. While an answer is
 // being checked, the error belongs to it: let the user send it again (the
 // backend keys answers on the question, so a resend can't double-count).
-function onLamissError(message: string): void {
+function onLamissError(message: string, canRetry = true): void {
   lamissLastErrorAt = Date.now();
   if (lamissQuestion?.phase === 'sending') {
     lamissQuestion.phase = 'answering';
     lamissQuestion.queued = false;
-    lamissQuestion.error = lamissT('question.couldNotCheck', { error: message });
+    lamissQuestion.error = canRetry ? lamissT('question.couldNotCheck', { error: message }) : message;
     renderLamissQuestion();
     return;
   }
