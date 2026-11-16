@@ -923,6 +923,8 @@ function startLamissLive(videoId: string, language: string | undefined): void {
   connectLamissLive();
   startLamissTimer();
   startLamissCaptions(videoId);
+  // Recent frames of the video, for questions about what it shows (Lamiss#88).
+  startLamissFrames();
   scheduleEnsureLamissButton();
   lamissLiveKeepalive = window.setInterval(() => postLamissLive({ type: 'keepalive' }), LAMISS_KEEPALIVE_INTERVAL_MS);
 }
@@ -934,6 +936,7 @@ function stopLamissLive(): void {
   hideLamissQuestion();
   stopLamissTimer();
   stopLamissCaptions();
+  stopLamissFrames();
   lamissPauseRequested = false;
   lamissLiveVideoId = undefined;
   lamissMonitoringStarted = false;
@@ -1730,11 +1733,14 @@ function submitLamissAsk(question: string): void {
   state.phase = 'sending';
   state.error = undefined;
   renderLamissQuestion();
-  postLamissLive({
-    type: 'ask',
-    requestId: state.askRequestId,
-    question,
-    positionMs: (getLamissVideo()?.currentTime ?? 0) * 1000
+  const requestId = state.askRequestId;
+  const positionMs = (getLamissVideo()?.currentTime ?? 0) * 1000;
+  // What the video shows, so Lamiss can answer about it (Lamiss#88); none if it can't be seen.
+  void captureLamissFrames().catch(() => []).then((frames) => {
+    if (lamissQuestion !== state || state.askRequestId !== requestId || state.phase !== 'sending') {
+      return;
+    }
+    postLamissLive({ type: 'ask', requestId, question, positionMs, ...(frames.length > 0 ? { frames } : {}) });
   });
 }
 

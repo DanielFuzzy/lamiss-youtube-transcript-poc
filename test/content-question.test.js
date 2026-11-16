@@ -131,7 +131,7 @@ function questionEnv() {
     clearInterval: () => undefined
   };
   const env = createExtensionEnv({
-    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'content/double-captions.js', 'content/youtube.js'],
+    scripts: ['shared/lamiss-config.js', 'shared/lamiss-i18n.js', 'shared/lamiss-api.js', 'content/double-captions.js', 'content/video-frames.js', 'content/youtube.js'],
     withoutSessionStorage: true,
     globals: {
       window,
@@ -371,6 +371,8 @@ test('ask lamiss: the card opens listening, sends the spoken question, reads the
   assert.equal(page.video.paused, false, 'the video keeps playing');
 
   page.listenEvent({ type: 'transcribed', text: 'What is he holding?' });
+  // Sent once the video's frames are captured (Lamiss#88): none here, the fake video has no picture.
+  await flush();
   const ask = page.posted.at(-1);
   assert.equal(ask.type, 'ask');
   assert.equal(ask.question, 'What is he holding?');
@@ -395,12 +397,14 @@ test('ask lamiss: a failed answer can be sent again with the same interactionId,
   await flush();
   page.env.run('openLamissAsk()');
   page.listenEvent({ type: 'transcribed', text: 'Why?' });
+  await flush();
   const first = page.posted.at(-1);
   page.env.context.onLamissLiveMessage({ type: 'ask-result', requestId: first.requestId, ok: false, error: 'AI down', retryable: true });
   assert.equal(page.phase(), 'answering');
   assert.equal(page.player.querySelector('.lamiss-question__status').textContent, "Lamiss couldn't answer: AI down");
 
   page.env.run('onLamissQuestionSubmit()');
+  await flush();
   assert.equal(page.posted.at(-1).type, 'ask');
   assert.equal(page.posted.at(-1).requestId, first.requestId);
 

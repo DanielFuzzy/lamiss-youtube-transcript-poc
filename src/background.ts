@@ -708,7 +708,8 @@ type LamissLiveClientMessage =
   | { type: 'answer'; answeredTo: string; answer: string; language?: string }
   // The learner's own question from the Ask Lamiss card (Lamiss#84); requestId
   // is its interactionId, so a retry gets the stored answer.
-  | { type: 'ask'; requestId: string; question: string; positionMs: number }
+  // frames: what the video showed, as JPEG data URLs, earliest first (Lamiss#88).
+  | { type: 'ask'; requestId: string; question: string; positionMs: number; frames?: string[] }
   | { type: 'listen'; requestId: string }
   | { type: 'stop-listening'; requestId: string; discard: boolean }
   | { type: 'speak'; requestId: string; text: string; language?: string }
@@ -1024,7 +1025,7 @@ function reconnectLiveConnections(accessToken: string): void {
 
 // The Ask Lamiss card's question goes to the backend like the chat panel's;
 // the chat panel then reloads its history to show it (Lamiss#84).
-async function askFromCard(live: LamissLiveConnection, message: { requestId: string; question: string; positionMs: number }): Promise<void> {
+async function askFromCard(live: LamissLiveConnection, message: { requestId: string; question: string; positionMs: number; frames?: unknown }): Promise<void> {
   const learningSessionId = live.learningSessionId;
   if (learningSessionId === undefined || typeof message.question !== 'string' || !message.question.trim()) {
     postLive(live, { type: 'ask-result', requestId: message.requestId, ok: false, error: lamissT('ask.notConnected'), retryable: true });
@@ -1035,7 +1036,8 @@ async function askFromCard(live: LamissLiveConnection, message: { requestId: str
       interactionId: message.requestId,
       learningSessionId,
       videoPositionMs: Number.isFinite(message.positionMs) ? Math.max(0, Math.round(message.positionMs)) : 0,
-      text: message.question.trim()
+      text: message.question.trim(),
+      frames: (Array.isArray(message.frames) ? message.frames : []).map(lamissDataUrlToBlob).filter((frame): frame is Blob => frame !== null)
     }),
     fetchPreferences()
   ]);
