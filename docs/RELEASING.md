@@ -15,8 +15,9 @@ The addresses live in **`config/environments.json`**:
 | Environment | Used for | `apiUrl` rules | Overrides |
 |---|---|---|---|
 | `development` | `npm run build`, `npm test`, loading `compiled/` unpacked | anything `http(s)://host[:port]` (default `http://localhost:8080`) | `LAMISS_API_URL` and `LAMISS_GOOGLE_CLIENT_ID` from the shell or a git-ignored `.env` |
-| `staging` | testers loading a ZIP unpacked, against a staging server | `https://` on a public host | none |
-| `production` | the Chrome Web Store package | `https://` on a public host | none |
+| `prod` | `npm run build:prod`: loading `compiled/` unpacked against the production backend, with the development extension ID | `https://lamiss-production.up.railway.app` | none |
+| `staging` | testers loading a ZIP unpacked, against a staging server (none exists yet) | `https://` on a public host | none |
+| `production` | the Chrome Web Store package, against the production backend: `https://lamiss-production.up.railway.app` on Railway | `https://` on a public host | none |
 | `store-draft` | only to create the store item before a public backend exists (§5); never submitted | `http://localhost:8080` | none |
 
 `googleClientId` is the public client ID of the Google OAuth client (not a secret). It is required for staging
@@ -103,9 +104,8 @@ npm run package:production     # or package:staging
    trader details).
 2. **First upload by hand, to create the item.** This is only to get the store's **extension ID**: the item stays
    a draft and is **not** submitted.
-   - Before a public backend exists, build `npm run package:store-draft`. It is a store package (no `"key"`)
-     pointed at `http://localhost:8080`, and is never built by CI. Once production has an `apiUrl`, use
-     `npm run package:production` instead.
+   - Build `npm run package:production`: production has its `apiUrl` (the Railway backend). The
+     `store-draft` package is only for a time without a public backend, and is no longer needed.
    - In the dashboard, click **+ New item**, choose the ZIP from `dist/`, and confirm. The item is created as
      a **Draft**, and its 32-letter ID appears in the item's page address and under **Package**.
    - **Do not click "Submit for review"** with a store-draft package.

@@ -46,7 +46,7 @@ test('build config: staging and production come only from the file, over https o
 
   assert.throws(() => resolveBuildConfig(config, 'production', { LAMISS_API_URL: 'https://evil.example' }), /can only override development/);
   assert.throws(() => resolveBuildConfig(config, 'production', { LAMISS_GOOGLE_CLIENT_ID: CLIENT_ID }), /can only override development/);
-  assert.throws(() => resolveBuildConfig(environments(), 'production', {}), /no apiUrl for "production"/);
+  assert.throws(() => resolveBuildConfig(environments({ production: { apiUrl: null } }), 'production', {}), /no apiUrl for "production"/);
   assert.throws(() => resolveBuildConfig(environments({ staging: { apiUrl: 'https://staging.lamiss.app' } }), 'staging', {}), /no googleClientId/);
   for (const apiUrl of ['http://api.lamiss.app', 'https://localhost', 'https://127.0.0.1:8080', 'https://192.168.1.20', 'https://10.0.0.5', 'https://lamiss.local']) {
     assert.throws(() => resolveBuildConfig(environments({ production: { apiUrl, googleClientId: CLIENT_ID } }), 'production', {}), /https|public host/, apiUrl);
@@ -57,14 +57,20 @@ test('build config: staging and production come only from the file, over https o
   assert.throws(() => resolveBuildConfig(environments(), 'qa', {}), /unknown environment/);
 });
 
-test('build config: pre is the Railway backend, from the file only, keeping the development extension ID', () => {
-  const pre = resolveBuildConfig(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'environments.json'), 'utf8')), 'pre', {});
-  assert.equal(pre.apiOrigin, 'https://lamiss-production.up.railway.app');
-  assert.equal(pre.wsOrigin, 'wss://lamiss-production.up.railway.app');
-  assert.match(pre.googleClientId, /\.apps\.googleusercontent\.com$/);
-  assert.equal(pre.chromeWebStore, false);
-  assert.throws(() => resolveBuildConfig(environments({ pre: { apiUrl: 'https://pre.lamiss.app', googleClientId: CLIENT_ID } }), 'pre', { LAMISS_API_URL: 'http://localhost:8080' }), /can only override development/);
-  assert.throws(() => resolveBuildConfig(environments({ pre: { apiUrl: 'http://pre.lamiss.app', googleClientId: CLIENT_ID } }), 'pre', {}), /https/);
+test('build config: prod (unpacked) and production (the store package) are the Railway backend, from the file only', () => {
+  const file = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'environments.json'), 'utf8'));
+  const prod = resolveBuildConfig(file, 'prod', {});
+  const production = resolveBuildConfig(file, 'production', {});
+  for (const config of [prod, production]) {
+    assert.equal(config.apiOrigin, 'https://lamiss-production.up.railway.app');
+    assert.equal(config.wsOrigin, 'wss://lamiss-production.up.railway.app');
+    assert.match(config.googleClientId, /\.apps\.googleusercontent\.com$/);
+  }
+  // The unpacked build keeps the development extension ID; the store package gets the store's.
+  assert.equal(prod.chromeWebStore, false);
+  assert.equal(production.chromeWebStore, true);
+  assert.throws(() => resolveBuildConfig(environments({ prod: { apiUrl: 'https://api.lamiss.app', googleClientId: CLIENT_ID } }), 'prod', { LAMISS_API_URL: 'http://localhost:8080' }), /can only override development/);
+  assert.throws(() => resolveBuildConfig(environments({ prod: { apiUrl: 'http://api.lamiss.app', googleClientId: CLIENT_ID } }), 'prod', {}), /https/);
 });
 
 test('build config: local and private hosts are recognized', () => {

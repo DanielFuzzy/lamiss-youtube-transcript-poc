@@ -33,19 +33,22 @@ this repository or to the build.
 
 `compiled/` is the unpacked extension. It is build output and is not committed.
 
-### Switch between the local backend and PRE (Railway)
+### Switch between the local backend and production (Railway)
 
 | Command | Backend |
 |---|---|
 | `npm run build:local` | your local backend (`http://localhost:8080`, or `LAMISS_API_URL` from `.env`) |
-| `npm run build:pre` | PRE on Railway (`https://lamiss-production.up.railway.app`, `wss://` for the live session) |
+| `npm run build:prod` | production on Railway (`https://lamiss-production.up.railway.app`, `wss://` for the live session) |
 
 Both write `compiled/`. After switching, click **Reload** on Lamiss in
-`chrome://extensions` and sign in again: the sign-in is per backend. PRE keeps
-the same extension ID as local, so PRE needs `chrome-extension://fjjelpamfjfkndcgjdfmkjglkimhokec`
-in its `LAMISS_CORS_ALLOWED_ORIGINS` and the same `GOOGLE_CLIENT_ID` as the
-extension. PRE's address and client ID live in `config/environments.json`
-(`pre`); `.env` is ignored for it.
+`chrome://extensions` and sign in again: the sign-in is per backend. The
+`prod` build keeps the same extension ID as local, so production needs
+`chrome-extension://fjjelpamfjfkndcgjdfmkjglkimhokec` in its
+`LAMISS_CORS_ALLOWED_ORIGINS` and the same `GOOGLE_CLIENT_ID` as the extension.
+Its address and client ID live in `config/environments.json` (`prod`); `.env` is
+ignored for it. It talks to the real production backend and database: what you
+do with it is real data. The Chrome Web Store package (`npm run package:production`,
+docs/RELEASING.md) uses the same backend, with the store's own extension ID.
 
 These variables only apply to **development** builds. Each environment's backend
 (development, staging, production) is set in `config/environments.json`; the
