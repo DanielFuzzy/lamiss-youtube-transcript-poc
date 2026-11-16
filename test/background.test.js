@@ -784,3 +784,32 @@ test('daily goal (Lamiss#98): the socket tells Lamiss the time zone, passes DAIL
   await flush();
   assert.deepEqual(env.runtimeSent.find(message => message.type === 'chime'), { target: 'lamiss-offscreen', type: 'chime', speakerDeviceId: 'speaker-3', volume: 0.4 });
 });
+
+test('questions from the position (Lamiss#91): the session starts with where the video is, when the tab says', async () => {
+  const sessionBodies = [];
+  const env = backgroundEnv({
+    extra: async (url, init) => {
+      if (url.endsWith('/api/learning-sessions')) {
+        sessionBodies.push(JSON.parse(init.body));
+        return { json: { learningSessionId: 42, videoId: 1, videoExternalId: 'vid', resumed: false, aiKnowledgeReady: true } };
+      }
+      if (url.endsWith('/api/auth/ws-ticket')) {
+        return { json: { ticket: 't', expiresAt: futureIso(30_000) } };
+      }
+      return undefined;
+    }
+  });
+  signIn(env);
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'start', videoId: 'vid', positionMs: 1998123.6 });
+  await flush();
+  assert.deepEqual(sessionBodies, [{ videoExternalId: 'vid', positionMs: 1998124 }]);
+
+  // Without a position (an older tab, or during an ad): left out, as before.
+  const other = fakePort();
+  env.onConnect.listeners[0](other);
+  other.send({ type: 'start', videoId: 'vid2', positionMs: Number.NaN });
+  await flush();
+  assert.deepEqual(sessionBodies.at(-1), { videoExternalId: 'vid2' });
+});
