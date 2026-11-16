@@ -143,6 +143,40 @@ async function captureLamissFrames(): Promise<string[]> {
   }
 }
 
+// For a question about what the video shows (Lamiss#89): `count` frames over
+// spanMs, taken only now that one is due (nothing in the background). None
+// when the video is paused, an ad plays, or any frame is black or can't be
+// copied (a protected video).
+const LAMISS_VISUAL_FRAME_COUNT = 3;
+const LAMISS_VISUAL_FRAME_SPAN_MS = 3000;
+
+async function captureLamissFramesOverTime(count = LAMISS_VISUAL_FRAME_COUNT, spanMs = LAMISS_VISUAL_FRAME_SPAN_MS): Promise<string[]> {
+  const frames: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, spanMs / (count - 1)));
+    }
+    const video = lamissFrameSource();
+    if (!video || video.paused) {
+      return [];
+    }
+    const bitmap = await snapshotLamissFrame(video);
+    if (!bitmap) {
+      return [];
+    }
+    try {
+      const frame = await encodeLamissFrame(bitmap);
+      if (!frame) {
+        return [];
+      }
+      frames.push(frame);
+    } finally {
+      bitmap.close();
+    }
+  }
+  return frames;
+}
+
 // The chat panel (an extension page framed in this tab, which can't see the
 // video) asks for them. Only this extension's own pages may: not another
 // extension, not a website.

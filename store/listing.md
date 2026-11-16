@@ -53,8 +53,9 @@ decision or an account; nothing here has been submitted yet.
   - Personally identifiable information: **yes** (name, email address).
   - Authentication information: **yes** (Google sign-in, session token).
   - Personal communications: **yes** (questions to the tutor and answers, typed or spoken).
-  - Website content: **yes** (captions and title of the YouTube video in use, and two still images of it with each
-    question the learner asks, so the tutor can answer about what it shows; not stored).
+  - Website content: **yes** (captions and title of the YouTube video in use, and still images of it: two with each
+    question the learner asks, and three every few of the tutor's questions so it can ask about what is shown; not
+    stored).
   - User activity: **yes** (playback position on videos used with Lamiss, questions answered, practice time).
   - Health, financial and payment info, location, web history: **no**.
 - **Certifications** (tick only if true when submitting; they currently are, but re-check):

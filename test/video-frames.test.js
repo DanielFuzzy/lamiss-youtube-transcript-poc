@@ -115,3 +115,25 @@ test("frames: only this extension's pages may ask for them, such as the chat pan
   const reply = await env.dispatchMessage({ type: 'lamiss:capture-frames' }, senders.chat);
   assert.equal(reply.frames.length, 1);
 });
+
+test('visual questions (Lamiss#89): three frames over the span, taken only when asked', async () => {
+  const { env, page } = framesEnv();
+  const frames = await env.run('captureLamissFramesOverTime(3, 20)');
+  assert.equal(frames.length, 3);
+  assert.ok(frames.every(frame => frame.startsWith('data:image/jpeg;base64,')));
+  assert.ok(page.bitmaps.every(bitmap => bitmap.closed), 'every frame taken is released');
+});
+
+test('visual questions (Lamiss#89): none when the video is paused, an ad plays, or a frame is black', async () => {
+  const paused = framesEnv();
+  paused.video.paused = true;
+  assert.deepEqual([...await paused.env.run('captureLamissFramesOverTime(3, 20)')], []);
+
+  const ad = framesEnv();
+  ad.page.ad = true;
+  assert.deepEqual([...await ad.env.run('captureLamissFramesOverTime(3, 20)')], []);
+
+  const black = framesEnv();
+  black.page.pixels = BLACK;
+  assert.deepEqual([...await black.env.run('captureLamissFramesOverTime(3, 20)')], []);
+});
