@@ -5,8 +5,9 @@
 
 // store-draft: a store package (no manifest key) for a local backend, only to
 // create the Chrome Web Store item as a draft; never submitted for review.
-// pre: the cloud backend on Railway for the unpacked extension.
-const ENVIRONMENTS = ['development', 'pre', 'staging', 'production', 'store-draft'];
+// prod: the production backend (Railway) for the unpacked extension; the
+// same backend as production, which is the Chrome Web Store package.
+const ENVIRONMENTS = ['development', 'prod', 'staging', 'production', 'store-draft'];
 
 // Hosts that only make sense on a developer's machine or private network.
 function isLocalOrPrivateHost(hostname) {

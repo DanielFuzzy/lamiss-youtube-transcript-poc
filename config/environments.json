@@ -7,8 +7,8 @@
       "allowOverrides": true,
       "chromeWebStore": false
     },
-    "pre": {
-      "$comment": "PRE: the backend on Railway, for the unpacked extension (npm run build:pre, then reload compiled/ in chrome://extensions). Keeps the manifest key, so it has the same extension ID as development: the same CORS origin and Google redirect URI.",
+    "prod": {
+      "$comment": "The production backend on Railway, for the unpacked extension (npm run build:prod, then reload compiled/ in chrome://extensions). Keeps the manifest key, so it has the same extension ID as development: the same CORS origin and Google redirect URI. The same backend as production.",
       "apiUrl": "https://lamiss-production.up.railway.app",
       "googleClientId": "830984703143-ll10jstqbtsqq62krpm4iqnlke2g6r3e.apps.googleusercontent.com",
       "allowOverrides": false,
@@ -21,8 +21,9 @@
       "chromeWebStore": false
     },
     "production": {
-      "apiUrl": null,
-      "googleClientId": null,
+      "$comment": "The Chrome Web Store package (npm run package:production): the production backend on Railway, without the manifest key, so the store item has its own extension ID (docs/RELEASING.md section 5).",
+      "apiUrl": "https://lamiss-production.up.railway.app",
+      "googleClientId": "830984703143-ll10jstqbtsqq62krpm4iqnlke2g6r3e.apps.googleusercontent.com",
       "allowOverrides": false,
       "chromeWebStore": true
     },
