@@ -45,7 +45,7 @@ decision or an account; nothing here has been submitted yet.
   | `scripting` | Reads the YouTube player's caption track list and current playback position on the YouTube tab the user starts Lamiss on. |
   | `webRequest` | Observes (does not block or modify) YouTube's own caption requests on youtube.com, to fetch the same captions Lamiss needs for the video. |
   | `offscreen` | Records the user's spoken answers and plays Lamiss's voice from an offscreen document, which Manifest V3 requires for audio. |
-  | Host `https://www.youtube.com/*` | The in-page Lamiss button, question card and chat run on YouTube watch pages. |
+  | Host `https://www.youtube.com/*` | The in-page Lamiss button, question card and chat run on YouTube watch pages. When the user asks the tutor a question, two still frames of the video they are watching are copied from the page's video element and sent with it, so the tutor can answer about what is shown. |
   | Host `<backend>/*` | The LAMISS server the extension talks to (its sign-in, tutor, speech and progress API). |
 
 - **Remote code:** No. All code is in the package; the server only returns data (JSON, audio).
@@ -53,7 +53,8 @@ decision or an account; nothing here has been submitted yet.
   - Personally identifiable information: **yes** (name, email address).
   - Authentication information: **yes** (Google sign-in, session token).
   - Personal communications: **yes** (questions to the tutor and answers, typed or spoken).
-  - Website content: **yes** (captions and title of the YouTube video in use).
+  - Website content: **yes** (captions and title of the YouTube video in use, and two still images of it with each
+    question the learner asks, so the tutor can answer about what it shows; not stored).
   - User activity: **yes** (playback position on videos used with Lamiss, questions answered, practice time).
   - Health, financial and payment info, location, web history: **no**.
 - **Certifications** (tick only if true when submitting; they currently are, but re-check):

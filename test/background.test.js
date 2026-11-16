@@ -47,7 +47,7 @@ function googleSignsIn(env, override = {}) {
 function backgroundEnv(options = {}) {
   const env = createExtensionEnv({ scripts: ['background.js'], responder: backend(options.extra), tabs: options.tabs });
   if (!options.noConsent) {
-    env.local.data.set('lamissPrivacyNotice', { version: 1, acceptedAt: '2026-11-01T00:00:00.000Z' });
+    env.local.data.set('lamissPrivacyNotice', { version: 2, acceptedAt: '2026-11-01T00:00:00.000Z' });
   }
   return env;
 }
@@ -594,7 +594,17 @@ test('sign-in: "Agree and sign in" on an extension page records the acceptance a
   googleSignsIn(env);
   const result = await env.dispatchMessage({ type: 'lamiss:sign-in', acceptPrivacyNotice: true }, senders.popup);
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(env.local.data.get('lamissPrivacyNotice').version, 1);
+  assert.equal(env.local.data.get('lamissPrivacyNotice').version, 2);
+});
+
+test('sign-in (Lamiss#88): a notice accepted before questions carried video frames must be accepted again', async () => {
+  const env = backgroundEnv({ noConsent: true });
+  env.local.data.set('lamissPrivacyNotice', { version: 1, acceptedAt: '2026-11-01T00:00:00.000Z' });
+  googleSignsIn(env);
+  const result = await env.dispatchMessage({ type: 'lamiss:sign-in' }, senders.popup);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'consent_required');
+  assert.equal(env.identity.launches.length, 0);
 });
 
 test('sign-in: a content script cannot accept the notice for the user', async () => {
@@ -783,6 +793,42 @@ test('daily goal (Lamiss#98): the socket tells Lamiss the time zone, passes DAIL
   port.send({ type: 'chime', speakerDeviceId: 'forged', volume: 1 });
   await flush();
   assert.deepEqual(env.runtimeSent.find(message => message.type === 'chime'), { target: 'lamiss-offscreen', type: 'chime', speakerDeviceId: 'speaker-3', volume: 0.4 });
+});
+
+test('lamiss sees (Lamiss#88): a question from the Ask card goes with the frames the tab captured, at most two', async () => {
+  let askBody;
+  const env = backgroundEnv({
+    extra: async (url, init) => {
+      if (url.endsWith('/api/learning-sessions')) {
+        return { json: { learningSessionId: 42, videoId: 1, videoExternalId: 'vid', resumed: false, aiKnowledgeReady: true } };
+      }
+      if (url.endsWith('/api/auth/ws-ticket')) {
+        return { json: { ticket: 't', expiresAt: futureIso(30_000) } };
+      }
+      if (url.endsWith('/api/user-interaction/user-asks')) {
+        askBody = init.body;
+        return { json: { question: 'What is she holding?', answer: 'A red umbrella.' } };
+      }
+      return undefined;
+    }
+  });
+  signIn(env);
+  const port = fakePort();
+  env.onConnect.listeners[0](port);
+  port.send({ type: 'start', videoId: 'vid' });
+  await flush();
+  const jpeg = text => `data:image/jpeg;base64,${Buffer.from(text).toString('base64')}`;
+
+  port.send({ type: 'ask', requestId: 'r-1', question: 'What is she holding?', positionMs: 1000,
+    frames: [jpeg('before'), jpeg('now'), jpeg('extra'), 'not a frame'] });
+  await flush();
+
+  const frames = askBody.getAll('frames');
+  assert.equal(frames.length, 2);
+  assert.equal(await frames[0].text(), 'before');
+  assert.equal(await frames[1].text(), 'now');
+  assert.equal(frames[0].type, 'image/jpeg');
+  assert.equal(askBody.get('question'), 'What is she holding?');
 });
 
 test('questions from the position (Lamiss#91): the session starts with where the video is, when the tab says', async () => {

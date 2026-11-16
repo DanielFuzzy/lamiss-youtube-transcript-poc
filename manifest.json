@@ -62,6 +62,7 @@
         "shared/lamiss-i18n.js",
         "shared/lamiss-api.js",
         "content/double-captions.js",
+        "content/video-frames.js",
         "content/youtube.js"
       ],
       "css": [

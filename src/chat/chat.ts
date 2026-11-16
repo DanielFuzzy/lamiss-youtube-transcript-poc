@@ -266,6 +266,24 @@ async function chatStartSession(): Promise<void> {
   await chatLoadLog();
 }
 
+// What the video in this panel's tab shows (Lamiss#88): the page's content
+// script copies the frames, since this panel can't see the video. None when it
+// doesn't answer in time, or the video can't be seen.
+const CHAT_FRAMES_TIMEOUT_MS = 1500;
+
+async function chatCaptureFrames(): Promise<Blob[]> {
+  try {
+    const reply = await Promise.race([
+      chrome.tabs.sendMessage(chatTabId, { type: LAMISS_CAPTURE_FRAMES_MESSAGE }) as Promise<{ frames?: unknown } | undefined>,
+      new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), CHAT_FRAMES_TIMEOUT_MS))
+    ]);
+    const frames = Array.isArray(reply?.frames) ? reply.frames : [];
+    return frames.map(lamissDataUrlToBlob).filter((frame): frame is Blob => frame !== null);
+  } catch {
+    return [];
+  }
+}
+
 // One question, from asking to answer. The user bubble stays in place; a
 // failed attempt offers a retry that resends the same interactionId, so the
 // backend returns the stored answer instead of asking the AI twice.
@@ -278,10 +296,12 @@ async function chatSend(question: ChatQuestion, userMessage: HTMLDivElement): Pr
   chatRender();
   const typing = chatAddTyping();
 
+  const frames = await chatCaptureFrames();
   const result = await askLamiss({
     interactionId: question.interactionId,
     learningSessionId: chatSessionId,
     videoPositionMs: question.videoPositionMs,
+    frames,
     ...(question.text !== undefined ? { text: question.text } : { audio: question.audio as Blob })
   });
 

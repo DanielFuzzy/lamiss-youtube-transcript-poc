@@ -79,7 +79,8 @@ type LamissSignInFailure = 'cancelled' | 'interaction_required' | 'state_mismatc
 
 const LAMISS_PRIVACY_POLICY_URL = 'https://danielfuzzy.github.io/lamiss-youtube-transcript-poc/privacy-policy.html';
 const LAMISS_PRIVACY_NOTICE_KEY = 'lamissPrivacyNotice';
-const LAMISS_PRIVACY_NOTICE_VERSION = 1;
+// 2: questions carry still images of the video (Lamiss#88).
+const LAMISS_PRIVACY_NOTICE_VERSION = 2;
 
 async function hasAcceptedPrivacyNotice(): Promise<boolean> {
   try {
@@ -410,7 +411,29 @@ type LamissQuestion = {
   interactionId: string;
   learningSessionId: number;
   videoPositionMs: number;
+  // What the video showed when it was asked (Lamiss#88): JPEGs, earliest first.
+  frames?: Blob[];
 } & ({ text: string } | { audio: Blob });
+
+// Chat panel → its tab's content script: the video's frames for a question (Lamiss#88).
+const LAMISS_CAPTURE_FRAMES_MESSAGE = 'lamiss:capture-frames';
+
+// A data URL (a frame from the content script) as a Blob, or null if it isn't an image.
+function lamissDataUrlToBlob(dataUrl: unknown): Blob | null {
+  if (typeof dataUrl !== 'string') {
+    return null;
+  }
+  const match = /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) {
+    return null;
+  }
+  const bytes = atob(match[2]);
+  const data = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i += 1) {
+    data[i] = bytes.charCodeAt(i);
+  }
+  return new Blob([data], { type: match[1] });
+}
 
 async function callLamiss<T>(path: string, init: RequestInit, options: LamissCallOptions = {}): Promise<LamissCallResult<T>> {
   const misconfigured = lamissMisconfigured();
@@ -508,6 +531,10 @@ function askLamiss(question: LamissQuestion): Promise<LamissCallResult<LamissAns
     const extension = question.audio.type === 'audio/ogg' ? 'ogg' : 'webm';
     form.append('audio', question.audio, `question.${extension}`);
   }
+  // At most two, as the backend accepts.
+  (question.frames ?? []).slice(0, 2).forEach((frame, index) => {
+    form.append('frames', frame, `frame-${index}.${frame.type === 'image/png' ? 'png' : 'jpg'}`);
+  });
 
   // No explicit Content-Type: fetch sets multipart/form-data with the boundary.
   return callLamiss<LamissAnswer>('/api/user-interaction/user-asks', {
