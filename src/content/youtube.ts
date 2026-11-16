@@ -976,7 +976,10 @@ function connectLamissLive(): void {
       }
     }, 1000);
   });
-  port.postMessage({ type: 'start', videoId });
+  // Where the video is, so Lamiss's first questions are generated there (Lamiss#91).
+  // During an ad, currentTime is the ad's: left out.
+  const currentTime = getLamissPlayer()?.classList.contains('ad-showing') ? undefined : getLamissVideo()?.currentTime;
+  port.postMessage({ type: 'start', videoId, ...(Number.isFinite(currentTime) ? { positionMs: (currentTime as number) * 1000 } : {}) });
 }
 
 function postLamissLive(message: LamissLiveClientMessage): void {

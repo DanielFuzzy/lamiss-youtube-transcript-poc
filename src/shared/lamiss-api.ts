@@ -507,11 +507,16 @@ function fetchSessionChat(learningSessionId: number): Promise<LamissCallResult<L
 const LAMISS_START_SESSION_MESSAGE = 'lamiss:start-session';
 
 // Resumes the signed-in user's open session on the video, or starts one.
-function startLearningSession(videoExternalId: string): Promise<LamissCallResult<LamissLearningSession>> {
+// positionMs: where the video is, so its first questions are generated there
+// (Lamiss#91); left out when unknown.
+function startLearningSession(videoExternalId: string, positionMs?: number): Promise<LamissCallResult<LamissLearningSession>> {
+  const position = typeof positionMs === 'number' && Number.isFinite(positionMs) && positionMs >= 0
+    ? { positionMs: Math.round(positionMs) }
+    : {};
   return callLamiss<LamissLearningSession>('/api/learning-sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoExternalId })
+    body: JSON.stringify({ videoExternalId, ...position })
   });
 }
 

@@ -702,7 +702,8 @@ type LamissServerMessage =
   | { type: 'DAILY_GOAL_REACHED'; practicedMinutes: number; goalMinutes: number };
 
 type LamissLiveClientMessage =
-  | { type: 'start'; videoId: string }
+  // positionMs: where the video is when Lamiss starts (Lamiss#91).
+  | { type: 'start'; videoId: string; positionMs?: number }
   // playing: false reports where a paused viewer is; it never triggers a question.
   | { type: 'position'; positionMs: number; playing?: boolean }
   | { type: 'answer'; answeredTo: string; answer: string; language?: string }
@@ -752,6 +753,8 @@ type LamissPendingQuestion = { eventId: string; question: string; language?: str
 type LamissLiveConnection = {
   port: chrome.runtime.Port;
   videoId?: string;
+  // Where the video was when Lamiss started on it, for the first questions (Lamiss#91).
+  startPositionMs?: number;
   learningSessionId?: number;
   socket?: WebSocket;
   // The last answer sent, shown in the chat panel next to its feedback.
@@ -828,10 +831,10 @@ function scheduleLiveReconnect(live: LamissLiveConnection, detail: string): void
 // start two sessions, splitting the conversation. They share one request.
 const learningSessionRequests = new Map<string, Promise<LamissCallResult<LamissLearningSession>>>();
 
-function startSharedLearningSession(videoId: string): Promise<LamissCallResult<LamissLearningSession>> {
+function startSharedLearningSession(videoId: string, positionMs?: number): Promise<LamissCallResult<LamissLearningSession>> {
   let request = learningSessionRequests.get(videoId);
   if (!request) {
-    request = startLearningSession(videoId).finally(() => learningSessionRequests.delete(videoId));
+    request = startLearningSession(videoId, positionMs).finally(() => learningSessionRequests.delete(videoId));
     learningSessionRequests.set(videoId, request);
   }
   return request;
@@ -874,7 +877,7 @@ async function connectLive(live: LamissLiveConnection): Promise<void> {
   }
 
   if (live.learningSessionId === undefined) {
-    const session = await startSharedLearningSession(live.videoId);
+    const session = await startSharedLearningSession(live.videoId, live.startPositionMs);
     if (superseded()) {
       return;
     }
@@ -1074,6 +1077,7 @@ function onLiveClientMessage(live: LamissLiveConnection, message: LamissLiveClie
     case 'start':
       if (!live.videoId && typeof message.videoId === 'string') {
         live.videoId = message.videoId;
+        live.startPositionMs = Number.isFinite(message.positionMs) ? message.positionMs : undefined;
         postLive(live, { type: 'status', state: 'connecting' });
         void connectLive(live);
         void updateWakeListening();
